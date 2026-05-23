@@ -8,10 +8,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.Models;
+using System.Text.RegularExpressions;
 
 namespace Swarm.Cluster.Services;
 
@@ -19,12 +21,11 @@ namespace Swarm.Cluster.Services;
 /// Consumes Serilog logs from RabbitMQ, buffers them, and performs bulk inserts into the database.
 /// Maintains a buffer of the latest logs per node for quick access.
 /// </summary>
-public class LogConsumerService : BackgroundService
+public partial class LogConsumerService : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<LogConsumerService> _logger;
-    private readonly IConfiguration _configuration;
-    private IConnection? _connection;
+    private readonly IConnection _rabbitConnection;
+    private readonly ClusterDbContext _dbContext;
     private IModel? _channel;
     private CancellationToken _stoppingToken;
 
@@ -32,16 +33,19 @@ public class LogConsumerService : BackgroundService
     private readonly Dictionary<Guid, List<Log>> _logBuffer = new();
     private readonly Dictionary<Guid, List<Log>> _latestLogsBuffer = new();
 
+    // SSE subscribers: nodeId → list of channels waiting for new logs
+    private readonly Dictionary<Guid, List<System.Threading.Channels.Channel<Log>>> _subscribers = new();
+
     private const string LogQueueName = "logs";
     private const int BufferFlushIntervalMs = 5000;
     private const int MaxBufferSizePerNode = 1000;
     private const int LatestLogsPerNodeToKeep = 100;
 
-    public LogConsumerService(IServiceProvider serviceProvider, ILogger<LogConsumerService> logger, IConfiguration configuration)
+    public LogConsumerService(ClusterDbContext dbContext, ILogger<LogConsumerService> logger, IConnection rabbitConnection)
     {
-        _serviceProvider = serviceProvider;
+        _dbContext = dbContext;
         _logger = logger;
-        _configuration = configuration;
+        _rabbitConnection = rabbitConnection;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -50,19 +54,7 @@ public class LogConsumerService : BackgroundService
 
         try
         {
-            var rabbitMqConfig = _configuration.GetSection("RabbitMQ");
-            var connectionFactory = new ConnectionFactory
-            {
-                HostName = rabbitMqConfig["Hostname"] ?? "localhost",
-                Port = ushort.Parse(rabbitMqConfig["Port"] ?? "5672"),
-                UserName = rabbitMqConfig["Username"] ?? "guest",
-                Password = rabbitMqConfig["Password"] ?? "guest",
-                VirtualHost = rabbitMqConfig["VirtualHost"] ?? "/",
-                DispatchConsumersAsync = true
-            };
-
-            _connection = connectionFactory.CreateConnection();
-            _channel = _connection.CreateModel();
+            _channel = _rabbitConnection.CreateModel();
 
             _channel.QueueDeclare(
                 queue: LogQueueName,
@@ -96,7 +88,7 @@ public class LogConsumerService : BackgroundService
         }
     }
 
-    private async Task OnLogReceived(object model, BasicDeliverEventArgs ea)
+    private Task OnLogReceived(object model, BasicDeliverEventArgs ea)
     {
         try
         {
@@ -104,6 +96,7 @@ public class LogConsumerService : BackgroundService
             var message = System.Text.Encoding.UTF8.GetString(body);
             
             var logEntry = ParseLogMessage(message, ea.BasicProperties);
+            _logger.LogDebug("Received log from {nodeId}", logEntry?.NodeId);
             
             if (logEntry != null)
             {
@@ -119,78 +112,100 @@ public class LogConsumerService : BackgroundService
                     value.Add(logEntry);
                     _latestLogsBuffer[logEntry.NodeId].Add(logEntry);
 
-                    // Keep only the latest logs in the latest buffer
                     if (_latestLogsBuffer[logEntry.NodeId].Count > LatestLogsPerNodeToKeep)
-                    {
                         _latestLogsBuffer[logEntry.NodeId].RemoveAt(0);
-                    }
 
-                    // Flush if buffer exceeds max size
                     if (value.Count >= MaxBufferSizePerNode)
-                    {
                         _ = FlushLogsForNodeAsync(logEntry.NodeId, _stoppingToken);
-                    }
+
+                    // Push to SSE subscribers
+                    if (_subscribers.TryGetValue(logEntry.NodeId, out var subs))
+                        foreach (var sub in subs)
+                            sub.Writer.TryWrite(logEntry);
                 }
 
-                _channel.BasicAck(ea.DeliveryTag, false);
+                _channel!.BasicAck(ea.DeliveryTag, false);
             }
             else
             {
                 _logger.LogWarning("Failed to parse log message from RabbitMQ");
-                _channel.BasicNack(ea.DeliveryTag, false, true);
+                _channel!.BasicNack(ea.DeliveryTag, false, true);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing log message from RabbitMQ");
-            try
-            {
-                _channel.BasicNack(ea.DeliveryTag, false, true);
-            }
-            catch { }
+            try { _channel!.BasicNack(ea.DeliveryTag, false, true); } catch { }
         }
+
+        return Task.CompletedTask;
     }
 
     private Log? ParseLogMessage(string message, IBasicProperties properties)
     {
         try
         {
+            _logger.LogDebug("Raw RabbitMQ log message: {Raw}", message[..Math.Min(500, message.Length)]);
+
             using var doc = JsonDocument.Parse(message);
             var root = doc.RootElement;
 
-            // Extract NodeId from properties or message
-            if (!Guid.TryParse(GetJsonPropertyAsString(root, "NodeId"), out var nodeId))
+            // Serilog compact JSON format uses @t, @mt, @l, @x; enriched properties are top-level
+            bool isCompact = root.TryGetProperty("@mt", out _);
+
+            Guid nodeId = Guid.Empty;
+            var nodeIdStr = isCompact
+                ? GetJsonPropertyAsString(root, "NodeId")
+                : (GetJsonPropertyAsString(root, "NodeId") ??
+                   (root.TryGetProperty("Properties", out var props2) ? GetJsonPropertyAsString(props2, "NodeId") : null));
+
+            if (!Guid.TryParse(nodeIdStr, out nodeId))
             {
-                // Try from headers
-                if (properties?.Headers?.TryGetValue("X-Node-Id", out var nodeIdObj) == true)
+                if (properties?.Headers?.TryGetValue("X-Node-Id", out var nodeIdObj) == true &&
+                    nodeIdObj is byte[] nodeIdBytes &&
+                    Guid.TryParse(System.Text.Encoding.UTF8.GetString(nodeIdBytes), out nodeId))
                 {
-                    var nodeIdBytes = nodeIdObj as byte[];
-                    if (nodeIdBytes != null && Guid.TryParse(System.Text.Encoding.UTF8.GetString(nodeIdBytes), out nodeId))
-                    {
-                        // Found node ID in headers
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Could not parse NodeId from message headers");
-                        return null;
-                    }
+                    // found in AMQP headers
                 }
                 else
                 {
-                    _logger.LogWarning("No NodeId found in log message");
+                    _logger.LogWarning("No NodeId found in log message, raw: {Raw}", message[..Math.Min(200, message.Length)]);
                     return null;
                 }
+            }
+
+            string messageTemplate;
+            string renderedMessage;
+            string? level;
+            string? exception;
+            DateTime timestamp;
+
+            if (isCompact)
+            {
+                messageTemplate = GetJsonPropertyAsString(root, "@mt") ?? "";
+                renderedMessage = RenderCompactTemplate(root, messageTemplate);
+                level = CompactLevelToFull(GetJsonPropertyAsString(root, "@l"));
+                exception = GetJsonPropertyAsString(root, "@x");
+                timestamp = GetJsonPropertyAsDateTime(root, "@t");
+            }
+            else
+            {
+                messageTemplate = GetJsonPropertyAsString(root, "MessageTemplate") ?? GetJsonPropertyAsString(root, "Message") ?? "";
+                renderedMessage = GetJsonPropertyAsString(root, "RenderedMessage") ?? messageTemplate;
+                level = GetJsonPropertyAsString(root, "Level");
+                exception = GetJsonPropertyAsString(root, "Exception");
+                timestamp = GetJsonPropertyAsDateTime(root, "Timestamp");
             }
 
             var log = new Log
             {
                 Id = Guid.NewGuid(),
                 NodeId = nodeId,
-                Level = GetJsonPropertyAsString(root, "Level") ?? "Information",
-                MessageTemplate = GetJsonPropertyAsString(root, "MessageTemplate") ?? GetJsonPropertyAsString(root, "Message") ?? "",
-                Message = GetJsonPropertyAsString(root, "RenderedMessage"),
-                Exception = GetJsonPropertyAsString(root, "Exception"),
-                Timestamp = GetJsonPropertyAsDateTime(root, "Timestamp"),
+                Level = level ?? "Information",
+                MessageTemplate = messageTemplate,
+                Message = renderedMessage,
+                Exception = exception,
+                Timestamp = timestamp,
                 CreatedAt = DateTime.UtcNow,
                 Properties = ExtractProperties(root)
             };
@@ -204,7 +219,28 @@ public class LogConsumerService : BackgroundService
         }
     }
 
-    private string? GetJsonPropertyAsString(JsonElement element, string propertyName)
+    private static string RenderCompactTemplate(JsonElement root, string template)
+    {
+        return MyRegex().Replace(template, m =>
+        {
+            var key = m.Groups[1].Value;
+            if (root.TryGetProperty(key, out var val))
+                return val.ValueKind == JsonValueKind.String ? val.GetString()! : val.GetRawText();
+            return m.Value;
+        });
+    }
+
+    private static string CompactLevelToFull(string? level) => level switch
+    {
+        "V" or "Verbose" => "Verbose",
+        "D" or "Debug"   => "Debug",
+        "W" or "Warning" => "Warning",
+        "E" or "Error"   => "Error",
+        "F" or "Fatal"   => "Fatal",
+        _                => "Information",
+    };
+
+    private static string? GetJsonPropertyAsString(JsonElement element, string propertyName)
     {
         if (element.TryGetProperty(propertyName, out var property))
         {
@@ -213,19 +249,17 @@ public class LogConsumerService : BackgroundService
         return null;
     }
 
-    private DateTime GetJsonPropertyAsDateTime(JsonElement element, string propertyName)
+    private static DateTime GetJsonPropertyAsDateTime(JsonElement element, string propertyName)
     {
         if (element.TryGetProperty(propertyName, out var property))
         {
-            if (DateTime.TryParse(property.GetString(), out var dt))
-            {
-                return dt;
-            }
+            if (DateTime.TryParse(property.GetString(), null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt))
+                return dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
         }
         return DateTime.UtcNow;
     }
 
-    private string? ExtractProperties(JsonElement root)
+    private static string? ExtractProperties(JsonElement root)
     {
         try
         {
@@ -277,19 +311,38 @@ public class LogConsumerService : BackgroundService
         List<Log> logsToFlush;
         lock (_bufferLock)
         {
-            if (!_logBuffer.ContainsKey(nodeId) || _logBuffer[nodeId].Count == 0)
+            if (!_logBuffer.TryGetValue(nodeId, out List<Log>? value) || value.Count == 0)
                 return;
 
-            logsToFlush = new List<Log>(_logBuffer[nodeId]);
-            _logBuffer[nodeId].Clear();
+            logsToFlush = [.. value];
+            value.Clear();
         }
 
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ClusterDbContext>();
-            await dbContext.Logs.AddRangeAsync(logsToFlush, cancellationToken);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            var rows = string.Join(",", logsToFlush.Select(_ => "(gen_random_uuid(),@p{0},@p{1},@p{2},@p{3},@p{4},@p{5},@p{6},@p{7})"));
+            var parameters = new List<Npgsql.NpgsqlParameter>();
+            var valueClauses = new System.Text.StringBuilder();
+
+            for (int i = 0; i < logsToFlush.Count; i++)
+            {
+                var log = logsToFlush[i];
+                int b = i * 7;
+                if (i > 0) valueClauses.Append(',');
+                valueClauses.Append($"(@n{b},@l{b},@mt{b},@m{b},@ex{b},@pr{b},@ts{b},@ca{b})");
+                parameters.Add(new Npgsql.NpgsqlParameter($"n{b}", log.NodeId));
+                parameters.Add(new Npgsql.NpgsqlParameter($"l{b}", log.Level));
+                parameters.Add(new Npgsql.NpgsqlParameter($"mt{b}", log.MessageTemplate));
+                parameters.Add(new Npgsql.NpgsqlParameter($"m{b}", (object?)log.Message ?? DBNull.Value));
+                parameters.Add(new Npgsql.NpgsqlParameter($"ex{b}", (object?)log.Exception ?? DBNull.Value));
+                parameters.Add(new Npgsql.NpgsqlParameter($"pr{b}", (object?)log.Properties ?? DBNull.Value));
+                parameters.Add(new Npgsql.NpgsqlParameter($"ts{b}", log.Timestamp));
+                parameters.Add(new Npgsql.NpgsqlParameter($"ca{b}", log.CreatedAt));
+            }
+
+            var sql = $"INSERT INTO \"Logs\" (\"Id\",\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Timestamp\",\"CreatedAt\") SELECT gen_random_uuid(), * FROM (VALUES {valueClauses}) AS v(\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Timestamp\",\"CreatedAt\")";
+            await _dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken);
+
             _logger.LogInformation("Flushed {LogCount} logs for node {NodeId} to database", logsToFlush.Count, nodeId);
         }
         catch (Exception ex)
@@ -306,14 +359,43 @@ public class LogConsumerService : BackgroundService
         }
     }
 
-    /// <summary>
-    /// Gets the current buffer size for a specific node.
-    /// </summary>
     public int GetBufferSizeForNode(Guid nodeId)
     {
         lock (_bufferLock)
         {
-            return _logBuffer.ContainsKey(nodeId) ? _logBuffer[nodeId].Count : 0;
+            return _logBuffer.TryGetValue(nodeId, out List<Log>? value) ? value.Count : 0;
+        }
+    }
+
+    public List<Log> GetRecentLogsForNode(Guid nodeId)
+    {
+        lock (_bufferLock)
+        {
+            return _latestLogsBuffer.TryGetValue(nodeId, out var logs)
+                ? [.. logs]
+                : [];
+        }
+    }
+
+    public System.Threading.Channels.Channel<Log> Subscribe(Guid nodeId)
+    {
+        var channel = System.Threading.Channels.Channel.CreateUnbounded<Log>(
+            new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true });
+        lock (_bufferLock)
+        {
+            if (!_subscribers.ContainsKey(nodeId))
+                _subscribers[nodeId] = new List<System.Threading.Channels.Channel<Log>>();
+            _subscribers[nodeId].Add(channel);
+        }
+        return channel;
+    }
+
+    public void Unsubscribe(Guid nodeId, System.Threading.Channels.Channel<Log> channel)
+    {
+        lock (_bufferLock)
+        {
+            if (_subscribers.TryGetValue(nodeId, out var subs))
+                subs.Remove(channel);
         }
     }
 
@@ -334,11 +416,13 @@ public class LogConsumerService : BackgroundService
             }
         }
 
-        await Task.Delay(1000); // Give flush tasks time to complete
+        await Task.Delay(1000, cancellationToken);
 
         _channel?.Dispose();
-        _connection?.Dispose();
 
         await base.StopAsync(cancellationToken);
     }
+
+    [GeneratedRegexAttribute(@"\{(\w+)(?::[^}]*)?\}", RegexOptions.Compiled)]
+    private static partial System.Text.RegularExpressions.Regex MyRegex();
 }

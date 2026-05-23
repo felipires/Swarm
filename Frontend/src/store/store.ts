@@ -1,61 +1,65 @@
 import { create } from "zustand";
 
-interface Node {
+export interface Node {
   id: string;
   name: string;
-  status: string;
-  capabilitiesJson: string;
+  status: "Online" | "Offline";
   lastHeartbeatAt: string;
-}
-
-interface Task {
-  id: string;
-  name: string;
-  taskType: string;
-  schemaJson: string;
   createdAt: string;
 }
 
-interface Run {
+export interface TaskDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  configJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskInstance {
   id: string;
   taskDefinitionId: string;
   nodeId: string;
-  status: string;
-  rowsProcessed: number;
-  errorCount: number;
-  durationMs: number;
+  status: "Pending" | "Dispatched" | "Running" | "Completed" | "Failed";
+  resultJson?: string;
+  errorMessage?: string;
   createdAt: string;
+  dispatchedAt?: string;
   completedAt?: string;
 }
 
 interface StoreState {
   nodes: Node[];
-  tasks: Task[];
-  runs: Run[];
+  tasks: TaskDefinition[];
+  instances: TaskInstance[];
   selectedNode: Node | null;
-  selectedTask: Task | null;
-  selectedRun: Run | null;
+  selectedTask: TaskDefinition | null;
 
   setNodes: (nodes: Node[]) => void;
-  setTasks: (tasks: Task[]) => void;
-  setRuns: (runs: Run[]) => void;
+  setTasks: (tasks: TaskDefinition[]) => void;
+  setInstances: (instances: TaskInstance[]) => void;
+  upsertInstance: (instance: TaskInstance) => void;
   setSelectedNode: (node: Node | null) => void;
-  setSelectedTask: (task: Task | null) => void;
-  setSelectedRun: (run: Run | null) => void;
+  setSelectedTask: (task: TaskDefinition | null) => void;
 }
 
 export const useStore = create<StoreState>((set) => ({
   nodes: [],
   tasks: [],
-  runs: [],
+  instances: [],
   selectedNode: null,
   selectedTask: null,
-  selectedRun: null,
 
   setNodes: (nodes) => set({ nodes }),
   setTasks: (tasks) => set({ tasks }),
-  setRuns: (runs) => set({ runs }),
+  setInstances: (instances) => set({ instances }),
+  upsertInstance: (instance) =>
+    set((s) => ({
+      instances: s.instances.some((i) => i.id === instance.id)
+        ? s.instances.map((i) => (i.id === instance.id ? instance : i))
+        : [...s.instances, instance],
+    })),
   setSelectedNode: (node) => set({ selectedNode: node }),
   setSelectedTask: (task) => set({ selectedTask: task }),
-  setSelectedRun: (run) => set({ selectedRun: run }),
 }));

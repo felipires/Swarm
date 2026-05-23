@@ -21,6 +21,8 @@ public class NodeWorker(
         await _backgroundMaestro.WaitAsync();
 
         var heartBeatService = _serviceProvider.GetRequiredService<HeartBeatService>();
+        var taskExecutor = _serviceProvider.GetRequiredService<TaskExecutorService>();
+        await taskExecutor.StartAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {

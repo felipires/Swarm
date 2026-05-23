@@ -56,12 +56,10 @@ public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.Node
             };
         }
 
-        await _nodeService.UpdateHeartbeatAsync(nodeId, request.IsOnline);
+        var known = await _nodeService.UpdateHeartbeatAsync(nodeId, request.IsOnline);
 
-        return new RecordHeartbeatResponse
-        {
-            Success = true,
-            Message = "Heartbeat recorded successfully"
-        };
+        return known
+            ? new RecordHeartbeatResponse { Success = true, Message = "Heartbeat recorded successfully" }
+            : new RecordHeartbeatResponse { Success = false, Message = "NodeNotFound" };
     }
 }

@@ -12,3 +12,15 @@ CREATE TABLE IF NOT EXISTS "RemoteParameters" (
     "QueueUserName" TEXT,
     "QueuePassword" TEXT
 );
+
+CREATE TABLE IF NOT EXISTS "LocalTask" (
+    "Id" TEXT NOT NULL PRIMARY KEY,
+    "ClusterTaskId" TEXT NOT NULL,
+    "ConfigJson" TEXT NOT NULL DEFAULT '{}',
+    "Status" TEXT NOT NULL DEFAULT 'pending',
+    "CreatedAt" TEXT NOT NULL DEFAULT (datetime('now')),
+    "CompletedAt" TEXT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "IX_LocalTask_Status" ON "LocalTask" ("Status");
+CREATE INDEX IF NOT EXISTS "IX_LocalTask_ClusterTaskId" ON "LocalTask" ("ClusterTaskId");

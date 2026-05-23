@@ -73,13 +73,13 @@ public class NodeService
     /// <summary>
     /// Record heartbeat from a node
     /// </summary>
-    public async Task UpdateHeartbeatAsync(Guid nodeId, bool isOnline = true)
+    public async Task<bool> UpdateHeartbeatAsync(Guid nodeId, bool isOnline = true)
     {
         var node = await _dbContext.Nodes.FindAsync(nodeId);
         if (node == null)
         {
             _logger.LogWarning("Heartbeat received from unknown node: {NodeId}", nodeId);
-            return;
+            return false;
         }
 
         var wasOffline = node.Status == Node.NodeStatus.Offline;
@@ -93,6 +93,7 @@ public class NodeService
         }
 
         await _dbContext.SaveChangesAsync();
+        return true;
     }
 
     /// <summary>

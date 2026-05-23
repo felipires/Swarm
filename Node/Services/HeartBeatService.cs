@@ -3,12 +3,13 @@ using Swarm.Cluster.Services;
 
 namespace Swarm.Node.Services;
 
-public class HeartBeatService(IConfiguration configuration, GrpcChannel grpcChannel, ILogger<HeartBeatService> logger)
+public class HeartBeatService(IConfiguration configuration, GrpcChannel grpcChannel, ILogger<HeartBeatService> logger, RegistrationService registrationService)
 {
     private readonly string _nodeId = configuration["NodeId"] ?? throw new InvalidOperationException("NodeId is not configured");
     private readonly string _apiKey = configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey is not configured");
     private readonly ILogger<HeartBeatService> _logger = logger;
     private readonly GrpcChannel _grpcChannel = grpcChannel;
+    private readonly RegistrationService _registrationService = registrationService;
 
     public async Task<bool> SendHeartBeatAsync()
     {
@@ -16,20 +17,21 @@ public class HeartBeatService(IConfiguration configuration, GrpcChannel grpcChan
         try
         {
             var client = new NodesService.NodesServiceClient(_grpcChannel);
-            var request = new RecordHeartbeatRequest
+            var response = await client.RecordHeartbeatAsync(new RecordHeartbeatRequest
             {
                 NodeId = _nodeId,
                 ApiKey = _apiKey,
                 IsOnline = true
-            };
+            });
 
-            var response = await client.RecordHeartbeatAsync(request);
-            
-            _logger.LogInformation("Heartbeat response: Success={Success}, Message={Message}", 
-                response.Success, response.Message);
-            
+            if (!response.Success && response.Message == "NodeNotFound")
+            {
+                _logger.LogWarning("Cluster does not recognise this node, re-registering");
+                await _registrationService.ForceRegisterWithClusterAsync();
+            }
+
             return response.Success;
-        } 
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending heartbeat to cluster");

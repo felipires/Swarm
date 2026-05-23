@@ -38,10 +38,19 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
 
             if (registered)
             {
-                _logger.LogDebug("Node is already registered with cluster");
+                _logger.LogDebug("Node is already registered, notifying cluster it is back online");
 
                 command.CommandText = "UPDATE Configuration SET Online = 1 WHERE NodeId = (SELECT NodeId FROM Configuration LIMIT 1)";
                 command.ExecuteNonQuery();
+
+                // Tell the cluster immediately — otherwise it stays Offline until the next heartbeat timeout check
+                var reconnectClient = new NodesService.NodesServiceClient(_grpcChannel);
+                await reconnectClient.RecordHeartbeatAsync(new RecordHeartbeatRequest
+                {
+                    NodeId = _nodeId,
+                    ApiKey = _apiKey,
+                    IsOnline = true
+                });
 
                 return true;
             }
@@ -95,6 +104,21 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
             _logger.LogError(ex, "Error registering node with cluster");
             return false;
         }
+    }
+
+    public async Task ForceRegisterWithClusterAsync()
+    {
+        _logger.LogInformation("Forcing re-registration with cluster");
+
+        using var dbConnection = new SqliteConnection(_dbConnection.GetConnectionString());
+        await dbConnection.OpenAsync();
+        using var command = dbConnection.CreateCommand();
+
+        // Reset local registered flag so RegisterWithClusterAsync performs a full registration
+        command.CommandText = "UPDATE Configuration SET Registered = 0";
+        await command.ExecuteNonQueryAsync();
+
+        await RegisterWithClusterAsync();
     }
 
     public async Task SetNodeOfflineAsync()

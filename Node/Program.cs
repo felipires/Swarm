@@ -13,6 +13,9 @@ var configuration = new ConfigurationBuilder()
 
 Log.Logger = SerilogConfiguration.Configure(configuration).CreateBootstrapLogger();
 
+// Replace bootstrap logger with full logger including RabbitMQ sink
+SerilogConfiguration.AddRabbitMQSink(configuration);
+
 var builder = Host.CreateDefaultBuilder(args)
     .ConfigureServices(services =>
     {
@@ -44,9 +47,10 @@ var builder = Host.CreateDefaultBuilder(args)
                 
         // Add services
         services.AddSingleton<BackgroundMaestro>();
-        services.AddSingleton<AppDbConnection>();        
+        services.AddSingleton<AppDbConnection>();
         services.AddScoped<RegistrationService>();
         services.AddScoped<HeartBeatService>();
+        services.AddSingleton<TaskExecutorService>();
         
         // Add hosted services
         services.AddHostedService<StartupService>();

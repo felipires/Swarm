@@ -26,6 +26,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Serilog.Sinks.RabbitMQ" Version="8.0.0" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.0.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,6 @@
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
+using RabbitMQ.Client;
 using Serilog;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.GrpcServices;
@@ -24,19 +24,41 @@ builder.Services.AddDbContext<ClusterDbContext>(options =>
 //     options.builder.Configuration = redisConfig["Connection"];
 // });
 
+// RabbitMQ shared connection
+builder.Services.AddSingleton<IConnection>(_ =>
+{
+    var cfg = builder.Configuration.GetSection("RabbitMQ");
+    return new ConnectionFactory
+    {
+        HostName = cfg["Hostname"] ?? "localhost",
+        Port = cfg.GetValue<int>("Port", 5672),
+        UserName = cfg["Username"] ?? "guest",
+        Password = cfg["Password"] ?? "guest",
+        VirtualHost = cfg["VirtualHost"] ?? "/",
+        DispatchConsumersAsync = true
+    }.CreateConnection();
+});
+
 builder.Services.AddScoped<NodeService>();
+builder.Services.AddScoped<TaskDispatchService>();
 builder.Services.AddSingleton<LogConsumerService>();
 builder.Services.AddHostedService<HeartbeatBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LogConsumerService>());
+builder.Services.AddHostedService<TaskResultConsumerService>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddGrpc();
 builder.Services.AddEndpointsApiExplorer();
 
 builder.WebHost.ConfigureKestrel(options =>
 {
+    // Port 5000 — pure HTTP/2, gRPC only (no TLS, no upgrade negotiation)
     options.ListenLocalhost(5000, o => o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2);
-    options.ListenLocalhost(5001, o => 
+    // Port 5001 — HTTP/1.1 for REST API and Swagger
+    options.ListenLocalhost(5001, o => o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1);
+    // Port 5002 — HTTPS with HTTP/1.1+HTTP/2
+    options.ListenLocalhost(5002, o =>
     {
         o.UseHttps();
         o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;

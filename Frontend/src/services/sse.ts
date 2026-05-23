@@ -10,7 +10,7 @@ export class SseClient {
   private eventSource: EventSource | null = null;
 
   connect(runId: string, onMessage: (log: LogMessage) => void, onError: (error: Event) => void) {
-    const baseUrl = (import.meta as any).env.VITE_API_URL || "http://localhost:5000/api";
+    const baseUrl = (import.meta as any).env.VITE_API_URL || "http://localhost:5001/api";
 
     this.eventSource = new EventSource(`${baseUrl}/runs/${runId}/stream`);
 

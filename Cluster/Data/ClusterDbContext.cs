@@ -7,6 +7,8 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
 {
     public DbSet<Node> Nodes { get; set; } = null!;
     public DbSet<Log> Logs { get; set; } = null!;
+    public DbSet<TaskDefinition> TaskDefinitions { get; set; } = null!;
+    public DbSet<TaskInstance> TaskInstances { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -33,6 +35,30 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.HasIndex(e => e.NodeId);
             entity.HasIndex(e => e.Timestamp);
             entity.HasIndex(e => e.Level);
+        });
+
+        modelBuilder.Entity<TaskDefinition>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.ConfigJson).IsRequired().HasDefaultValue("{}");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()").IsRequired();
+        });
+
+        modelBuilder.Entity<TaskInstance>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Status).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.HasIndex(e => e.NodeId);
+            entity.HasIndex(e => e.Status);
+            entity.HasOne(e => e.TaskDefinition)
+                  .WithMany(t => t.Instances)
+                  .HasForeignKey(e => e.TaskDefinitionId)
+                  .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
