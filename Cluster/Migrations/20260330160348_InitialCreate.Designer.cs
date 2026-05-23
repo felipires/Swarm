@@ -12,7 +12,7 @@ using Swarm.Cluster.Data;
 namespace Swarm.Cluster.Migrations
 {
     [DbContext(typeof(ClusterDbContext))]
-    [Migration("20260325215418_InitialCreate")]
+    [Migration("20260330160348_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -33,7 +33,9 @@ namespace Swarm.Cluster.Migrations
                         .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
 
                     b.Property<string>("EnvironmentTagsJson")
                         .HasColumnType("text");
@@ -46,10 +48,8 @@ namespace Swarm.Cluster.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 

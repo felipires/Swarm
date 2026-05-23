@@ -19,7 +19,8 @@ public class HeartBeatService(IConfiguration configuration, GrpcChannel grpcChan
             var request = new RecordHeartbeatRequest
             {
                 NodeId = _nodeId,
-                ApiKey = _apiKey
+                ApiKey = _apiKey,
+                IsOnline = true
             };
 
             var response = await client.RecordHeartbeatAsync(request);

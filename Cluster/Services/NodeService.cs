@@ -36,8 +36,8 @@ public class NodeService
         var node = new Node
         {
             Id = nodeId ?? Guid.NewGuid(),
-            Name = existentNodeByName != null ? existentNodeByName : GenerateNodeName(),
-            Status = "online",
+            Name = existentNodeByName ?? GenerateNodeName(),
+            Status = Node.NodeStatus.Online,
             CreatedAt = DateTime.UtcNow,
             LastHeartbeatAt = DateTime.UtcNow,
             EnvironmentTagsJson = environmentTags != null ? JsonSerializer.Serialize(environmentTags) : null
@@ -72,7 +72,7 @@ public class NodeService
     /// <summary>
     /// Record heartbeat from a node
     /// </summary>
-    public async Task UpdateHeartbeatAsync(Guid nodeId)
+    public async Task UpdateHeartbeatAsync(Guid nodeId, bool isOnline = true)
     {
         var node = await _dbContext.Nodes.FindAsync(nodeId);
         if (node == null)
@@ -82,9 +82,11 @@ public class NodeService
         }
 
         node.LastHeartbeatAt = DateTime.UtcNow;
-        if (node.Status == "offline")
+        node.Status = isOnline ? Node.NodeStatus.Online : Node.NodeStatus.Offline;
+
+        if (isOnline && node.Status == Node.NodeStatus.Offline)
         {
-            node.Status = "online";
+            node.Status = Node.NodeStatus.Online;
             _logger.LogInformation("Node came online: {NodeId}", nodeId);
         }
 
@@ -94,13 +96,13 @@ public class NodeService
     /// <summary>
     /// Get all nodes with optional filtering
     /// </summary>
-    public async Task<List<Node>> GetNodesAsync(string? status = null)
+    public async Task<List<Node>> GetNodesAsync(Node.NodeStatus? status = null)
     {
         var query = _dbContext.Nodes.AsQueryable();
 
-        if (!string.IsNullOrEmpty(status))
+        if (status.HasValue)
         {
-            query = query.Where(n => n.Status == status);
+            query = query.Where(n => n.Status == status.Value);
         }
 
         return await query.OrderByDescending(n => n.LastHeartbeatAt).ToListAsync();
@@ -121,14 +123,14 @@ public class NodeService
     {
         var cutoffTime = DateTime.UtcNow.AddSeconds(-HeartbeatTimeoutSeconds);
         var offlineNodes = await _dbContext.Nodes
-            .Where(n => n.Status == "online" && n.LastHeartbeatAt < cutoffTime)
+            .Where(n => n.Status == Node.NodeStatus.Online && n.LastHeartbeatAt < cutoffTime)
             .ToListAsync();
 
         if (offlineNodes.Count != 0)
         {
             foreach (var node in offlineNodes)
             {
-                node.Status = "offline";
+                node.Status = Node.NodeStatus.Offline;
                 _logger.LogWarning("Node marked offline due to missing heartbeat: {NodeId}", node.Id);
             }
 
@@ -151,38 +153,18 @@ public class NodeService
     }
 
     /// <summary>
-    /// Generate a cryptographically secure API key
-    /// </summary>
-    private string GenerateApiKey()
-    {
-        return $"sk_{Guid.NewGuid().ToString().Replace("-", "").Substring(0, 32)}";
-    }
-
-    /// <summary>
     /// Generate a random name for nodeId
     /// </summary>
     /// <returns></returns>
-    private string  GenerateNodeName()
+    private static string GenerateNodeName()
     {
-        Random random = new();
-        char[] consonants = "bcdfghjklmnpqrstvwx".ToCharArray();
-        char[] vowels = "aeiouy".ToCharArray();
-        string name = "";
-
-        _logger.LogInformation("{Consonants} - {Vowels}", consonants, vowels);
-
-        name += consonants[random.Next(consonants.Length - 1)];
-        name += vowels[random.Next(vowels.Length - 1)];
-        short b = 2;
-
-        while (b < 13)
+        var generator = new NameGenerator.Generators.GamerTagGenerator
         {
-            name += consonants[random.Next(consonants.Length - 1)];
-            b++;
-            name += vowels[random.Next(vowels.Length - 1)];
-            b++;
-        }
+            GeneratorFlags = NameGenerator.GeneratorBase.NameTypes.Hashtag,
+            Sex = NameGenerator.GeneratorBase.SexTypes.Unisex
+        };
 
+        string name = generator.Generate();
         return name;
     }
 }

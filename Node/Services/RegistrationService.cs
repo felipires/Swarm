@@ -14,21 +14,39 @@ namespace Swarm.Node.Services;
 /// </summary>
 public class RegistrationService(ILogger<RegistrationService> logger, IConfiguration configuration, AppDbConnection dbConnection, GrpcChannel grpcChannel)
 {
+    private readonly string _nodeId = configuration["NodeId"] ?? throw new InvalidOperationException("NodeId is not configured");
+    private readonly string _apiKey = configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey is not configured");
     private readonly ILogger<RegistrationService> _logger = logger;
     private readonly IConfiguration _configuration = configuration;
     private readonly AppDbConnection _dbConnection = dbConnection;
     private readonly GrpcChannel _grpcChannel = grpcChannel;
-    private readonly string _nodeId = configuration["NodeId"] ?? throw new InvalidOperationException("NodeId is not configured");
-    private readonly string _apiKey = configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey is not configured");
 
-    public async Task<bool> RegisterWithClusterAsync(Dictionary<string, object>? capabilities = null)
+    public async Task<bool> RegisterWithClusterAsync()
     {
-        _logger.LogInformation("Registering node with cluster via gRPC");
+        _logger.LogDebug("Registering node with cluster");
 
         try
         {
-            var client = new NodesService.NodesServiceClient(_grpcChannel);
-            
+            using var dbConnection = new SqliteConnection(_dbConnection.GetConnectionString());
+
+            dbConnection.Open();
+            var command = dbConnection.CreateCommand();
+
+            command.CommandText = "SELECT Registered FROM Configuration LIMIT 1";
+
+            var registered = (long?)command.ExecuteScalar() == 1;
+
+            if (registered)
+            {
+                _logger.LogDebug("Node is already registered with cluster");
+
+                command.CommandText = "UPDATE Configuration SET Online = 1 WHERE NodeId = (SELECT NodeId FROM Configuration LIMIT 1)";
+                command.ExecuteNonQuery();
+
+                return true;
+            }
+
+            var client = new NodesService.NodesServiceClient(_grpcChannel);            
             var envVars = _configuration.AsEnumerable()
                 .ToDictionary(kv => kv.Key, kv => kv.Value ?? "");
             
@@ -39,24 +57,20 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
                 EnvironmentTags = { envVars }
             };
 
-            _logger.LogInformation("Sending registration request for node: {NodeId}", _nodeId);
+            _logger.LogDebug("Sending registration request for node: {NodeId}", _nodeId);
             
             var response = await client.RegisterNodeAsync(request);
 
-            _logger.LogInformation("Registration response: NodeId={NodeId}, NodeName={NodeName}", 
+            _logger.LogDebug("Registration response: NodeId={NodeId}, NodeName={NodeName}", 
                 response.NodeId, response.NodeName);
 
             if (response?.NodeId.IsNullOrEmpty() ?? true)
             {
-                throw new InvalidOperationException("Node failed while retrieving configuration");
+                throw new InvalidOperationException("Node failed while retrieving configuration. NodeId is missing in response.");
             }
             
-            using var dbConnection = new SqliteConnection(_dbConnection.GetConnectionString());
-
-            dbConnection.Open();
-            var command = dbConnection.CreateCommand();
             command.CommandText = """
-                INSERT OR REPLACE INTO Configuration (Registered, NodeId, NodeName) VALUES (1, $1, $2);
+                INSERT OR REPLACE INTO Configuration (Registered, Online, NodeId, NodeName) VALUES (1, 1, $1, $2);
                 INSERT OR REPLACE INTO RemoteParameters (NodeId, QueueHost, QueuePort, QueueUserName, QueuePassword)
                     VALUES ($1, $3, $4, $5, $6)
                 """;
@@ -68,6 +82,11 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
             command.Parameters.Add(new SqliteParameter("$5", response.QueueParameters.QueueUserName));
             command.Parameters.Add(new SqliteParameter("$6", response.QueueParameters.QueuePassword));
             command.ExecuteNonQuery();
+
+            _configuration["RabbitMQ:Hostname"] = response.QueueParameters.QueueHost;
+            _configuration["RabbitMQ:Port"] = response.QueueParameters.QueuePort.ToString();
+            _configuration["RabbitMQ:Username"] = response.QueueParameters.QueueUserName;
+            _configuration["RabbitMQ:Password"] = response.QueueParameters.QueuePassword;
             
             return true;
         } 
@@ -75,6 +94,35 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
         {
             _logger.LogError(ex, "Error registering node with cluster");
             return false;
+        }
+    }
+
+    public async Task SetNodeOfflineAsync()
+    {
+        try
+        {
+            using var connection = new SqliteConnection(_dbConnection.GetConnectionString());
+            await connection.OpenAsync();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE Configuration SET Online = 0";            
+
+            var client = new NodesService.NodesServiceClient(_grpcChannel);
+            var request = new RecordHeartbeatRequest
+            {
+                NodeId = _nodeId,
+                ApiKey = _apiKey,
+                IsOnline = false
+            };
+
+            await command.ExecuteNonQueryAsync();
+            await client.RecordHeartbeatAsync(request);
+
+            _logger.LogDebug("Node marked as offline");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error setting node offline");
         }
     }
 }

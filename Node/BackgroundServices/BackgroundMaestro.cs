@@ -16,14 +16,14 @@ public class BackgroundMaestro(ILogger<BackgroundMaestro> logger)
         {
             if (!_tcs.Task.IsCompleted)
             {
-                _logger.LogInformation("Releasing background services to start execution");
+                _logger.LogDebug("Releasing background services to start execution");
                 _tcs.TrySetResult();
             }
         }
     }
     public Task WaitAsync()
     {
-        _logger.LogInformation("Background services waiting for release signal");
+        _logger.LogDebug("Background services waiting for release signal");
         return _tcs.Task;
     }
 

@@ -23,10 +23,10 @@ public class NodesController : ControllerBase
     /// Get all nodes
     /// </summary>
     [HttpGet]
-    [ApiKeyRequired]
-    public async Task<ActionResult<List<NodeResponse>>> GetNodes([FromQuery] string? status = null)
+    // [ApiKeyRequired]
+    public async Task<ActionResult<List<NodeResponse>>> GetNodes([FromQuery] Node.NodeStatus? status = null)
     {
-        _logger.LogInformation("Fetching nodes with status filter: {Status}", status ?? "all");
+        _logger.LogInformation("Fetching nodes with status filter: {Status}", status?.ToString() ?? "all");
         
         var nodes = await _nodeService.GetNodesAsync(status);
         
@@ -46,7 +46,7 @@ public class NodesController : ControllerBase
     /// Get a specific node by ID
     /// </summary>
     [HttpGet("{id}")]
-    [ApiKeyRequired]
+    // [ApiKeyRequired]
     public async Task<ActionResult<NodeResponse>> GetNode(Guid id)
     {
         _logger.LogInformation("Fetching node: {NodeId}", id);
@@ -71,9 +71,9 @@ public class NodesController : ControllerBase
     }
 
     /// <summary>
-    /// Delete a node
+    /// Delete a node   
     /// </summary>
-    [ApiKeyRequired]
+    // [ApiKeyRequired]
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteNode(Guid id)
     {
@@ -92,7 +92,7 @@ public class NodesController : ControllerBase
     /// <summary>
     /// Trigger offline node detection (can be called periodically via scheduler)
     /// </summary>
-    [ApiKeyRequired]
+    [HttpPost("check-offline")]
     public async Task<ActionResult> CheckOfflineNodes()
     {
         _logger.LogInformation("Running offline node detection");
@@ -106,7 +106,7 @@ public class NodeResponse
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = null!;
-    public string Status { get; set; } = null!;
+    public Node.NodeStatus Status { get; set; } = Node.NodeStatus.Offline;
     public string CapabilitiesJson { get; set; } = null!;
     public DateTime LastHeartbeatAt { get; set; }
     public DateTime CreatedAt { get; set; }

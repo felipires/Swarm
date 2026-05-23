@@ -14,14 +14,14 @@ public class NodeWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Node worker starting, waiting for startup signal");
+        _logger.LogDebug("Node worker starting, waiting for startup signal");
         await _backgroundMaestro.WaitAsync();
 
         ExecutionContext:        
 
         try
         {            
-            _logger.LogInformation("Node worker starting main loop");
+            _logger.LogDebug("Node worker starting main loop");
 
             var heartBeatService = _serviceProvider.GetRequiredService<HeartBeatService>();
 
@@ -30,7 +30,7 @@ public class NodeWorker(
                 try
                 {
                     await heartBeatService.SendHeartBeatAsync();
-                    await Task.Delay(TimeSpan.FromSeconds(120), stoppingToken);
+                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -43,12 +43,12 @@ public class NodeWorker(
                 }
             }
 
-            _logger.LogInformation("Node worker stopped");
+            _logger.LogDebug("Node worker stopped");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Node worker encountered an error during execution");
-            _logger.LogInformation("Node worker restarting after error in 10 seconds");
+            _logger.LogDebug("Node worker restarting after error in 10 seconds");
             await Task.Delay(10000, stoppingToken);
             goto ExecutionContext;
         }

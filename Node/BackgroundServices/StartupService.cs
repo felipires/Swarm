@@ -1,13 +1,15 @@
 using System;
 using Swarm.Node.Data;
 using Swarm.Node.Services;
+using Swarm.Node.Logging;
 
 namespace Swarm.Node.BackgroundServices;
 
 public class StartupService(
     BackgroundMaestro gate,
     RegistrationService registrationService,
-    AppDbConnection dbConnection, 
+    AppDbConnection dbConnection,
+    IConfiguration configuration,
     ILogger<StartupService> logger,
     IHostApplicationLifetime appLifetime
     ) : IHostedService
@@ -15,6 +17,7 @@ public class StartupService(
     private readonly BackgroundMaestro _gate = gate;
     private readonly ILogger<StartupService> _logger = logger;
     private readonly AppDbConnection _dbConnection = dbConnection;
+    private readonly IConfiguration _configuration = configuration;
     private readonly IHostApplicationLifetime _appLifetime = appLifetime;
     private readonly RegistrationService _registrationService = registrationService;
 
@@ -22,8 +25,8 @@ public class StartupService(
     {
         try
         {
-            _logger.LogInformation("Startup service initializing node. Locking background services until initialization is complete.");
-            await InitializeNodeAsync();
+            _logger.LogDebug("Startup service initializing node. Locking background services until initialization is complete.");
+            await Task.WhenAll(InitializeNodeAsync(), SetupShutdownHandlerAsync());
             _gate.Release();
         } catch (Exception ex)
         {
@@ -36,7 +39,7 @@ public class StartupService(
 
     private async Task InitializeNodeAsync()
     {
-        _logger.LogInformation("Initializing node");
+        _logger.LogDebug("Initializing node");
 
         try
         {
@@ -50,12 +53,36 @@ public class StartupService(
                 throw new InvalidOperationException("Node registration failed");
             }
 
-            _logger.LogInformation("Node initialization completed successfully");
+            _logger.LogInformation("Node registered successfully. Configuring RabbitMQ logging sink.");
+            SerilogConfiguration.AddRabbitMQSink(_configuration);
+            _logger.LogInformation("RabbitMQ logging sink configured and active");
+
+            _logger.LogDebug("Node initialization completed successfully");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error occurred while initializing node");
             throw;
         }
+    }
+
+    private async Task SetupShutdownHandlerAsync()
+    {
+        await Task.Run(() =>
+        {
+            _appLifetime.ApplicationStopping.Register(async () =>
+            {
+                try
+                {
+                    _logger.LogDebug("Running shutdown operations...");
+                    await _registrationService.SetNodeOfflineAsync();
+                    _logger.LogDebug("Resources cleaned up successfully. Application is shutting down.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error during shutdown operations");
+                }
+            });
+        });
     }
 }

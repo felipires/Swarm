@@ -56,7 +56,7 @@ public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.Node
             };
         }
 
-        await _nodeService.UpdateHeartbeatAsync(nodeId);
+        await _nodeService.UpdateHeartbeatAsync(nodeId, request.IsOnline);
 
         return new RecordHeartbeatResponse
         {

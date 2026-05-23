@@ -25,7 +25,9 @@ builder.Services.AddDbContext<ClusterDbContext>(options =>
 // });
 
 builder.Services.AddScoped<NodeService>();
+builder.Services.AddSingleton<LogConsumerService>();
 builder.Services.AddHostedService<HeartbeatBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<LogConsumerService>());
 
 builder.Services.AddControllers();
 builder.Services.AddGrpc();
@@ -34,7 +36,11 @@ builder.Services.AddEndpointsApiExplorer();
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenLocalhost(5000, o => o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2);
-    options.ListenLocalhost(5001, o => o.UseHttps());
+    options.ListenLocalhost(5001, o => 
+    {
+        o.UseHttps();
+        o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
+    });
 });
 
 builder.Services.AddSwaggerGen(gen =>
@@ -83,12 +89,12 @@ if (app.Environment.IsDevelopment() || true)
 
 app.MapGrpcService<NodesGrpcService>();
 
-app.UseHttpsRedirection();
+// app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseMiddleware<ApiKeyAuthMiddleware>();
+// app.UseMiddleware<ApiKeyAuthMiddleware>();
 
 app.MapControllers();
 
