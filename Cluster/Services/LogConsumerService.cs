@@ -24,68 +24,63 @@ public class LogConsumerService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<LogConsumerService> _logger;
     private readonly IConfiguration _configuration;
-    private IConnection _connection;
+    private IConnection? _connection;
     private IModel? _channel;
-    private AsyncEventingBasicConsumer? _consumer;
     private CancellationToken _stoppingToken;
-    
+
     private readonly object _bufferLock = new object();
     private readonly Dictionary<Guid, List<Log>> _logBuffer = new();
     private readonly Dictionary<Guid, List<Log>> _latestLogsBuffer = new();
-    
+
     private const string LogQueueName = "logs";
-    private const int BufferFlushIntervalMs = 5000; // Flush every 5 seconds
-    private const int MaxBufferSizePerNode = 1000; // Max logs to keep in buffer before flushing
-    private const int LatestLogsPerNodeToKeep = 100; // Keep last 100 logs per node in memory
+    private const int BufferFlushIntervalMs = 5000;
+    private const int MaxBufferSizePerNode = 1000;
+    private const int LatestLogsPerNodeToKeep = 100;
 
     public LogConsumerService(IServiceProvider serviceProvider, ILogger<LogConsumerService> logger, IConfiguration configuration)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
         _configuration = configuration;
-
-        var rabbitMqConfig = _configuration.GetSection("RabbitMQ");
-        var connectionFactory = new ConnectionFactory
-        {
-            HostName = rabbitMqConfig["Hostname"] ?? "localhost",
-            Port = ushort.Parse(rabbitMqConfig["Port"] ?? "5672"),
-            UserName = rabbitMqConfig["Username"] ?? "guest",
-            Password = rabbitMqConfig["Password"] ?? "guest",
-            VirtualHost = rabbitMqConfig["VirtualHost"] ?? "/",
-            DispatchConsumersAsync = true
-        };
-
-        _connection = connectionFactory.CreateConnection();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stoppingToken = stoppingToken;
+
         try
         {
-            _stoppingToken = stoppingToken;
+            var rabbitMqConfig = _configuration.GetSection("RabbitMQ");
+            var connectionFactory = new ConnectionFactory
+            {
+                HostName = rabbitMqConfig["Hostname"] ?? "localhost",
+                Port = ushort.Parse(rabbitMqConfig["Port"] ?? "5672"),
+                UserName = rabbitMqConfig["Username"] ?? "guest",
+                Password = rabbitMqConfig["Password"] ?? "guest",
+                VirtualHost = rabbitMqConfig["VirtualHost"] ?? "/",
+                DispatchConsumersAsync = true
+            };
+
+            _connection = connectionFactory.CreateConnection();
             _channel = _connection.CreateModel();
-            
-            // Declare queue that receives logs from nodes
-            // When nodes publish to default exchange with routing key "logs",
-            // RabbitMQ routes to queue named "logs"
+
             _channel.QueueDeclare(
                 queue: LogQueueName,
                 durable: true,
                 exclusive: false,
                 autoDelete: false);
 
-            _consumer = new AsyncEventingBasicConsumer(_channel);
-            _consumer.Received += OnLogReceived;
+            var consumer = new AsyncEventingBasicConsumer(_channel);
+            consumer.Received += OnLogReceived;
 
             _channel.BasicConsume(
                 queue: LogQueueName,
                 autoAck: false,
                 consumerTag: "cluster-log-consumer",
-                consumer: _consumer);
+                consumer: consumer);
 
-            _logger.LogInformation("Log consumer started and listening for Serilog messages from queue '{QueueName}'", LogQueueName);
+            _logger.LogInformation("Log consumer started, listening on queue '{QueueName}'", LogQueueName);
 
-            // Start buffer flush task
             _ = FlushBufferPeriodically(stoppingToken);
 
             await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -279,30 +274,35 @@ public class LogConsumerService : BackgroundService
 
     private async Task FlushLogsForNodeAsync(Guid nodeId, CancellationToken cancellationToken)
     {
+        List<Log> logsToFlush;
+        lock (_bufferLock)
+        {
+            if (!_logBuffer.ContainsKey(nodeId) || _logBuffer[nodeId].Count == 0)
+                return;
+
+            logsToFlush = new List<Log>(_logBuffer[nodeId]);
+            _logBuffer[nodeId].Clear();
+        }
+
         try
         {
-            List<Log> logsToFlush;
-            lock (_bufferLock)
-            {
-                if (!_logBuffer.ContainsKey(nodeId) || _logBuffer[nodeId].Count == 0)
-                {
-                    return;
-                }
-
-                logsToFlush = new List<Log>(_logBuffer[nodeId]);
-                _logBuffer[nodeId].Clear();
-            }
-
-            if (logsToFlush.Count == 0)
-            {
-                return;
-            }
-
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ClusterDbContext>();
+            await dbContext.Logs.AddRangeAsync(logsToFlush, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Flushed {LogCount} logs for node {NodeId} to database", logsToFlush.Count, nodeId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error flushing logs for node {NodeId}", nodeId);
+
+            // Put logs back in the buffer so they are not lost
+            lock (_bufferLock)
+            {
+                if (!_logBuffer.ContainsKey(nodeId))
+                    _logBuffer[nodeId] = new List<Log>();
+                _logBuffer[nodeId].InsertRange(0, logsToFlush);
+            }
         }
     }
 

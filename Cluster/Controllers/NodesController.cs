@@ -99,16 +99,5 @@ public class NodesController : ControllerBase
         await _nodeService.MarkOfflineNodesAsync();
         return Ok(new { message = "Offline node detection completed" });
     }
-    public string Message { get; set; } = null!;
-}
-
-public class NodeResponse
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = null!;
-    public Node.NodeStatus Status { get; set; } = Node.NodeStatus.Offline;
-    public string CapabilitiesJson { get; set; } = null!;
-    public DateTime LastHeartbeatAt { get; set; }
-    public DateTime CreatedAt { get; set; }
 }
 

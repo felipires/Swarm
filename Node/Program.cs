@@ -24,15 +24,22 @@ var builder = Host.CreateDefaultBuilder(args)
                 
         // Configure gRPC channel
         services.AddSingleton(s => {
-            var clusterUrl = configuration["ClusterUrl"] 
+            var clusterUrl = configuration["ClusterUrl"]
                 ?? throw new InvalidOperationException("ClusterUrl is not configured");
-            
-            var httpHandler = new HttpClientHandler
-            {
-                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
-            };
 
-            return GrpcChannel.ForAddress(clusterUrl, new GrpcChannelOptions { HttpHandler = httpHandler });
+            var isDevelopment = configuration["ASPNETCORE_ENVIRONMENT"] == "Development";
+            var channelOptions = new GrpcChannelOptions();
+
+            if (isDevelopment)
+            {
+                var httpHandler = new HttpClientHandler
+                {
+                    ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                };
+                channelOptions.HttpHandler = httpHandler;
+            }
+
+            return GrpcChannel.ForAddress(clusterUrl, channelOptions);
         });
                 
         // Add services

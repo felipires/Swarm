@@ -66,23 +66,15 @@ public class StartupService(
         }
     }
 
-    private async Task SetupShutdownHandlerAsync()
+    private Task SetupShutdownHandlerAsync()
     {
-        await Task.Run(() =>
+        _appLifetime.ApplicationStopping.Register(() =>
         {
-            _appLifetime.ApplicationStopping.Register(async () =>
-            {
-                try
-                {
-                    _logger.LogDebug("Running shutdown operations...");
-                    await _registrationService.SetNodeOfflineAsync();
-                    _logger.LogDebug("Resources cleaned up successfully. Application is shutting down.");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error during shutdown operations");
-                }
-            });
+            // CancellationToken.Register does not support async callbacks — run sync and block
+            _registrationService.SetNodeOfflineAsync().GetAwaiter().GetResult();
+            _logger.LogDebug("Resources cleaned up successfully. Application is shutting down.");
         });
+
+        return Task.CompletedTask;
     }
 }

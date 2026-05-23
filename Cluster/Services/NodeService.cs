@@ -15,13 +15,14 @@ public class NodeService
     private readonly ClusterDbContext _dbContext;
     private readonly ILogger<NodeService> _logger;
     private readonly IConfiguration _config;
-    private const int HeartbeatTimeoutSeconds = 300;
+    private readonly int _heartbeatTimeoutSeconds;
 
     public NodeService(ClusterDbContext dbContext, ILogger<NodeService> logger, IConfiguration config)
     {
         _dbContext = dbContext;
         _logger = logger;
         _config = config;
+        _heartbeatTimeoutSeconds = config.GetValue<int>("Heartbeat:TimeoutSeconds", 300);
     }
 
     /// <summary>
@@ -81,13 +82,14 @@ public class NodeService
             return;
         }
 
+        var wasOffline = node.Status == Node.NodeStatus.Offline;
+
         node.LastHeartbeatAt = DateTime.UtcNow;
         node.Status = isOnline ? Node.NodeStatus.Online : Node.NodeStatus.Offline;
 
-        if (isOnline && node.Status == Node.NodeStatus.Offline)
+        if (isOnline && wasOffline)
         {
-            node.Status = Node.NodeStatus.Online;
-            _logger.LogInformation("Node came online: {NodeId}", nodeId);
+            _logger.LogInformation("Node came back online: {NodeId}", nodeId);
         }
 
         await _dbContext.SaveChangesAsync();
@@ -121,7 +123,7 @@ public class NodeService
     /// </summary>
     public async Task MarkOfflineNodesAsync()
     {
-        var cutoffTime = DateTime.UtcNow.AddSeconds(-HeartbeatTimeoutSeconds);
+        var cutoffTime = DateTime.UtcNow.AddSeconds(-_heartbeatTimeoutSeconds);
         var offlineNodes = await _dbContext.Nodes
             .Where(n => n.Status == Node.NodeStatus.Online && n.LastHeartbeatAt < cutoffTime)
             .ToListAsync();
