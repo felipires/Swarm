@@ -1,0 +1,82 @@
+Functional Software License (FSL) v1.1
+(Derived from Prosperity Public License)
+
+Copyright 2026 The Swarm Contributors
+
+This Software is being made available on an "as-is" basis under the Functional
+Software License. The Software is provided for a Restricted Period to Licensees
+for their Evaluation Period (typically 2 years from first release), during which
+the Licensee may evaluate the Software for potential commercial use.
+
+Terms:
+
+1. FUNCTIONAL SOFTWARE LICENSE
+
+   A. Grant of License. Subject to the limitations in Section 2, Licensor hereby
+      grants to each Licensee a personal, limited, non-exclusive, non-transferable
+      license to use, copy, modify, and distribute the Software.
+
+   B. Evaluation Period. This license permits evaluation and use of the Software
+      for the Restricted Period. The current Restricted Period expires at the end
+      of the calendar day in which the second anniversary of the first publicly
+      available release of the Software occurs, unless extended by Licensor.
+
+   C. Commercial Use. If Licensee intends to use the Software for commercial
+      purposes, the Licensee must:
+      1. Cease evaluation use within 30 days, and
+      2. Obtain a commercial license from Licensor, or
+      3. Continue using the Software under the terms of the License Conversion
+         provision in Section 2.
+
+2. LICENSE CONVERSION
+
+   A. Automatic Conversion. Upon expiration of the Restricted Period, this
+      license automatically converts to the Apache License, Version 2.0. From
+      that date forward, the Software is available under the terms of the
+      Apache License, Version 2.0.
+
+   B. Post-Conversion Use. After license conversion, all prior restrictions
+      expire, and the Software may be used for any purpose subject to the
+      Apache License, Version 2.0 terms.
+
+3. REDISTRIBUTION
+
+   Licensee may redistribute the Software under this license or subsequent
+   licenses, provided that redistributions include a copy of this license or
+   the then-current license under which the Software is available.
+
+4. LIMITATIONS
+
+   A. No Warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+      KIND, EXPRESS OR IMPLIED.
+
+   B. Limitation of Liability. IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY
+      INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES.
+
+   C. Termination. If Licensee violates any material term of this License,
+      Licensor may terminate this license immediately upon written notice.
+
+5. DEFINITIONS
+
+   "Restricted Period" means two (2) years from the date of the first publicly
+   available release of any version of the Software.
+
+   "Licensee" means each individual or entity that obtains a copy of the
+   Software and exercises rights granted by this License.
+
+   "Licensor" means the copyright owner(s) of the Software.
+
+For inquiries regarding commercial licensing or license conversion timing,
+contact: legal@swarm
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.

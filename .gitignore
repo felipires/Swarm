@@ -1,0 +1,48 @@
+# Build results
+*/**/bin/
+*/**/obj/
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+*.dll
+*.exe
+*.pdb
+
+# Visual Studio
+.vs/
+*.sln.DotSettings
+*.user
+.vscode/settings.json
+
+# IDE
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+
+# Logs
+logs/
+*.log
+
+# Secrets
+appsettings.*.json
+appsettings.Development.json
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite3
+
+# Node/Frontend
+node_modules/
+dist/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Local development
+.claude
