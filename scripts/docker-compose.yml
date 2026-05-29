@@ -53,7 +53,7 @@ services:
 
   cluster:
     build:
-      context: ./Cluster
+      context: ./../src/Swarm.Cluster
       dockerfile: Dockerfile
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=swarm_cluster;Username=postgres;Password=postgres"
@@ -77,7 +77,7 @@ services:
 
   node:
     build:
-      context: ./Node
+      context: ./../src/Swarm.Node
       dockerfile: Dockerfile
     environment:
       ClusterUrl: "http://cluster:5000"
