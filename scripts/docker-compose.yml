@@ -73,7 +73,7 @@ services:
     networks:
       - swarm-network
     volumes:
-      - ./Cluster/logs:/app/logs
+      - ../src/Swarm.Cluster/logs:/app/logs
 
   node:
     build:
@@ -90,7 +90,7 @@ services:
     networks:
       - swarm-network
     volumes:
-      - ./Node/logs:/app/logs
+      - ../src/Swarm.Node/logs:/app/logs
     deploy:
       replicas: 1 # Start 1 node instance
 

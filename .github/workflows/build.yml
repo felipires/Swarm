@@ -53,13 +53,13 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Run Unit Tests
-        run: dotnet test Swarm.Cluster.Tests/Swarm.Cluster.Tests.csproj --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test tests/Swarm.Cluster.Tests/Swarm.Cluster.Tests.csproj --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx"
 
       - name: Run Node Tests
-        run: dotnet test Swarm.Node.Tests/Swarm.Node.Tests.csproj --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test tests/Swarm.Node.Tests/Swarm.Node.Tests.csproj --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx"
 
       - name: Run SDK Tests
-        run: dotnet test Swarm.Node.Sdk.Tests/Swarm.Node.Sdk.Tests.csproj --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test tests/Swarm.Node.Sdk.Tests/Swarm.Node.Sdk.Tests.csproj --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results
         if: always()

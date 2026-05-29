@@ -53,7 +53,7 @@ jobs:
       - name: Build (JavaScript)
         if: matrix.language == 'javascript'
         run: |
-          cd Frontend
+          cd src/frontend
           npm ci
           npm run build
 

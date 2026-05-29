@@ -25,10 +25,10 @@ jobs:
       matrix:
         include:
           - name: cluster
-            dockerfile: ./Cluster/Dockerfile
+            dockerfile: ./src/Swarm.Cluster/Dockerfile
             image-name: cluster
           - name: node
-            dockerfile: ./Node/Dockerfile
+            dockerfile: ./src/Swarm.Node/Dockerfile
             image-name: node
 
     steps:

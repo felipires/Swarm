@@ -27,10 +27,10 @@ jobs:
         run: dotnet restore
 
       - name: Build Swarm.Node.Sdk
-        run: dotnet build Swarm.Node.Sdk/Swarm.Node.Sdk.csproj --configuration Release --no-restore
+        run: dotnet build src/Swarm.Node.Sdk/Swarm.Node.Sdk.csproj --configuration Release --no-restore
 
       - name: Pack Swarm.Node.Sdk
-        run: dotnet pack Swarm.Node.Sdk/Swarm.Node.Sdk.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }} --output nuget-packages
+        run: dotnet pack src/Swarm.Node.Sdk/Swarm.Node.Sdk.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }} --output nuget-packages
 
       - name: Publish to NuGet
         run: dotnet nuget push nuget-packages/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
