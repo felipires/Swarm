@@ -3,8 +3,7 @@ name: Feature Request
 about: Suggest an idea for Swarm
 title: "[FEATURE] "
 labels: enhancement
-assignees: ''
-
+assignees: ""
 ---
 
 ## Description

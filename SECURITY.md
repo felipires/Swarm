@@ -28,10 +28,10 @@ the issue. You should receive a response within 48 hours.
 
 Currently supported versions for security updates:
 
-| Version | Status | End of Support |
-|---------|--------|----------------|
-| 1.0.x   | Current | TBD |
-| 0.x.x   | Beta   | Unsupported |
+| Version | Status  | End of Support |
+| ------- | ------- | -------------- |
+| 1.0.x   | Current | TBD            |
+| 0.x.x   | Beta    | Unsupported    |
 
 ## Security Considerations for Swarm
 
@@ -64,6 +64,7 @@ strongly recommended.
 ### Docker Image Naming
 
 Docker images follow the pattern `swarm/<component>:latest`:
+
 ```dockerfile
 FROM swarm/node:latest
 ```
@@ -79,6 +80,7 @@ Security updates for all NuGet and npm dependencies are prioritized. Check the
 lock files (`packages.lock.json`, `package-lock.json`) for current versions.
 
 To report vulnerabilities in dependencies:
+
 1. Check for available updates: `dotnet list package --vulnerable`
 2. Report to the dependency maintainers directly
 3. If there's a workaround needed in Swarm, report to security@swarmhq.com

@@ -3,8 +3,7 @@ name: Documentation / Question
 about: Ask a question or suggest documentation improvements
 title: "[DOCS] "
 labels: documentation, question
-assignees: ''
-
+assignees: ""
 ---
 
 ## Question / Documentation Gap
@@ -14,6 +13,7 @@ What would you like to know or what documentation is unclear or missing?
 ## What I've Tried
 
 Have you already checked:
+
 - [ ] README.md
 - [ ] CONTRIBUTING.md
 - [ ] ROADMAP.md (in `.claude/`)

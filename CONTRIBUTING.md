@@ -16,6 +16,7 @@ Before submitting a bug report, please check the [issue tracker](../../issues) t
 avoid duplicates.
 
 **When filing a bug report, include:**
+
 - A clear, descriptive title
 - Description of the exact steps to reproduce the problem
 - Expected vs. actual behavior
@@ -26,6 +27,7 @@ avoid duplicates.
 ### Suggesting Enhancements
 
 Enhancement suggestions are tracked as GitHub issues. When suggesting an enhancement:
+
 - Use a clear, descriptive title
 - Provide a step-by-step description of the enhancement
 - Explain why this enhancement would be useful to Swarm users
@@ -58,7 +60,7 @@ The Swarm project follows principles outlined in the ROADMAP.md file:
 - **YAGNI** — build for requirements in hand, not imagined futures
 - **Interface Guidelines** — interfaces exist for boundaries and plugin points only
 - **Naming** — clear, specific names; async methods end in `Async`
-- **Comments** — explain *why*, not *what*; rename identifiers instead
+- **Comments** — explain _why_, not _what_; rename identifiers instead
 
 ### Testing Requirements
 
@@ -67,6 +69,7 @@ The Swarm project follows principles outlined in the ROADMAP.md file:
 - **Coverage targets** — >85% on pure logic, happy + failure paths for boundaries
 
 Run tests:
+
 ```bash
 dotnet test
 ```
@@ -86,6 +89,7 @@ Reference issue #123 if applicable.
 ```
 
 Examples:
+
 - `[Core] Add value resolution system for task config`
 - `[Fix] Correct TaskInstance FSM transition validation`
 - `[Tests] Add integration tests for OutboxPublisher`
