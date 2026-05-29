@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\Swarm.Node.Sdk\Swarm.Node.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Swarm.Node.Sdk\Swarm.Node.Sdk.csproj" />
   </ItemGroup>
 
 </Project>
