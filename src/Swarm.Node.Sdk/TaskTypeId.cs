@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace Swarm.Node.Sdk;
+namespace Swarm.Sdk;
 
 /// <summary>
 /// Parsed form of a <c>name@version</c> task-type identifier. Name is a

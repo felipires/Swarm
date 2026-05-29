@@ -81,9 +81,6 @@ namespace Swarm.Cluster.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now()");
 
-                    b.Property<string>("EnvironmentTagsJson")
-                        .HasColumnType("text");
-
                     b.Property<DateTime>("LastHeartbeatAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -91,6 +88,9 @@ namespace Swarm.Cluster.Migrations
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<string>("StaticTagsJson")
+                        .HasColumnType("text");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -102,6 +102,86 @@ namespace Swarm.Cluster.Migrations
                     b.HasIndex("Status");
 
                     b.ToTable("Nodes");
+                });
+
+            modelBuilder.Entity("Swarm.Cluster.Models.NodeCapability", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("JsonSchema")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("{}");
+
+                    b.Property<Guid>("NodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ReportedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("RequiredEnvKeysJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("[]");
+
+                    b.Property<string>("RequiredParamsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("[]");
+
+                    b.Property<string>("TaskType")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskType");
+
+                    b.HasIndex("NodeId", "TaskType")
+                        .IsUnique();
+
+                    b.ToTable("NodeCapabilities");
+                });
+
+            modelBuilder.Entity("Swarm.Cluster.Models.NodeOverlayTag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("NodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NodeId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("NodeOverlayTags");
                 });
 
             modelBuilder.Entity("Swarm.Cluster.Models.PendingDispatch", b =>
@@ -167,6 +247,12 @@ namespace Swarm.Cluster.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now()");
 
+                    b.Property<int>("DefaultStrategy")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DefaultTargetTagsJson")
+                        .HasColumnType("text");
+
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
@@ -213,10 +299,13 @@ namespace Swarm.Cluster.Migrations
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("text");
 
-                    b.Property<Guid>("NodeId")
+                    b.Property<Guid?>("NodeId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("ResultJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RuntimeParamsJson")
                         .HasColumnType("text");
 
                     b.Property<int>("Status")
@@ -234,6 +323,24 @@ namespace Swarm.Cluster.Migrations
                     b.HasIndex("TaskDefinitionId");
 
                     b.ToTable("TaskInstances");
+                });
+
+            modelBuilder.Entity("Swarm.Cluster.Models.NodeCapability", b =>
+                {
+                    b.HasOne("Swarm.Cluster.Models.Node", null)
+                        .WithMany()
+                        .HasForeignKey("NodeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Swarm.Cluster.Models.NodeOverlayTag", b =>
+                {
+                    b.HasOne("Swarm.Cluster.Models.Node", null)
+                        .WithMany()
+                        .HasForeignKey("NodeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Swarm.Cluster.Models.PendingDispatch", b =>

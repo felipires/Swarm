@@ -4,6 +4,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.Models;
+using Swarm.Sdk.Wire;
 
 namespace Swarm.Cluster.Services;
 
@@ -145,10 +146,3 @@ public class TaskResultConsumerService : BackgroundService
     }
 }
 
-public record TaskResultMessage
-{
-    public Guid InstanceId { get; init; }
-    public bool Success { get; init; }
-    public string? ResultJson { get; init; }
-    public string? ErrorMessage { get; init; }
-}

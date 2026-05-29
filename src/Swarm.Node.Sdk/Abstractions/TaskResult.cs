@@ -1,4 +1,4 @@
-namespace Swarm.Node.Sdk.Abstractions;
+namespace Swarm.Sdk.Abstractions;
 
 /// <summary>
 /// Outcome of a single handler invocation. Returned from

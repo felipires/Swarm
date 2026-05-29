@@ -10,6 +10,8 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
     public DbSet<TaskDefinition> TaskDefinitions { get; set; } = null!;
     public DbSet<TaskInstance> TaskInstances { get; set; } = null!;
     public DbSet<PendingDispatch> PendingDispatches { get; set; } = null!;
+    public DbSet<NodeOverlayTag> NodeOverlayTags { get; set; } = null!;
+    public DbSet<NodeCapability> NodeCapabilities { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -76,6 +78,37 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.HasOne<TaskInstance>()
                   .WithMany()
                   .HasForeignKey(e => e.InstanceId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NodeOverlayTag>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Key).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Value).IsRequired();
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.HasIndex(e => new { e.NodeId, e.Key }).IsUnique();
+            entity.HasOne<Node>()
+                  .WithMany()
+                  .HasForeignKey(e => e.NodeId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NodeCapability>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.TaskType).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.JsonSchema).IsRequired().HasColumnType("jsonb").HasDefaultValue("{}");
+            entity.Property(e => e.RequiredEnvKeysJson).IsRequired().HasColumnType("jsonb").HasDefaultValue("[]");
+            entity.Property(e => e.RequiredParamsJson).IsRequired().HasColumnType("jsonb").HasDefaultValue("[]");
+            entity.Property(e => e.ReportedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.HasIndex(e => new { e.NodeId, e.TaskType }).IsUnique();
+            entity.HasIndex(e => e.TaskType);
+            entity.HasOne<Node>()
+                  .WithMany()
+                  .HasForeignKey(e => e.NodeId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
     }

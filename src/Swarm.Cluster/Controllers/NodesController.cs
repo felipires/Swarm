@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Swarm.Cluster.Models;
 using Swarm.Cluster.Models.Dto;
 using Swarm.Cluster.Services;
+// Disambiguate against the SDK's Swarm.Node namespace.
+using Node = Swarm.Cluster.Models.Node;
 
 namespace Swarm.Cluster.Controllers;
 
@@ -84,5 +86,28 @@ public class NodesController : ControllerBase
         await _nodeService.DeleteNodeAsync(id);
         return Ok(new { message = "Node deleted successfully" });
     }
+
+    /// <summary>
+    /// Add or remove overlay tags on a node (D6 / P2-5). The Node receives the
+    /// updated set on its next heartbeat. Static tags reported at registration
+    /// are immutable and unaffected by this endpoint.
+    /// </summary>
+    [HttpPatch("{id}/tags")]
+    public async Task<ActionResult<Dictionary<string, string>>> UpdateOverlayTags(Guid id, [FromBody] UpdateOverlayTagsRequest body)
+    {
+        try
+        {
+            var effective = await _nodeService.UpdateOverlayTagsAsync(id, body.Add, body.Remove);
+            return Ok(effective);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+    }
 }
+
+public record UpdateOverlayTagsRequest(
+    Dictionary<string, string>? Add = null,
+    List<string>? Remove = null);
 

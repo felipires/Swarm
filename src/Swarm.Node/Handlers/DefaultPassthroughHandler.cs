@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Swarm.Node.Sdk.Abstractions;
+using Swarm.Sdk.Abstractions;
 
 namespace Swarm.Node.Handlers;
 

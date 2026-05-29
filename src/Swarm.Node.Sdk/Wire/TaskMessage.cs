@@ -1,4 +1,4 @@
-namespace Swarm.Node.Sdk.Wire;
+namespace Swarm.Sdk.Wire;
 
 /// <summary>
 /// Canonical wire payload published by the Cluster to a Node's task queue

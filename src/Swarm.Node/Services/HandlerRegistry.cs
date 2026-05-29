@@ -1,4 +1,4 @@
-using Swarm.Node.Sdk.Abstractions;
+using Swarm.Sdk.Abstractions;
 
 namespace Swarm.Node.Services;
 

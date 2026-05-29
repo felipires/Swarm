@@ -1,8 +1,8 @@
 using FluentAssertions;
-using Swarm.Node.Sdk;
+using Swarm.Sdk;
 using Xunit;
 
-namespace Swarm.Node.Sdk.Tests;
+namespace Swarm.Sdk.Tests;
 
 public class TaskTypeIdTests
 {

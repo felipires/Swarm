@@ -1,4 +1,4 @@
-namespace Swarm.Node.Sdk.Abstractions;
+namespace Swarm.Sdk.Abstractions;
 
 /// <summary>
 /// The primary integration surface for Swarm. Implement this on a class,

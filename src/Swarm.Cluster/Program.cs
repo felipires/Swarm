@@ -48,11 +48,13 @@ builder.Services.AddSingleton<IConnection>(_ =>
 
 builder.Services.AddScoped<NodeService>();
 builder.Services.AddScoped<TaskDispatchService>();
+builder.Services.AddScoped<Swarm.Cluster.Validation.DispatchValidator>();
 builder.Services.AddSingleton<LogConsumerService>();
 builder.Services.AddHostedService<HeartbeatBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LogConsumerService>());
 builder.Services.AddHostedService<TaskResultConsumerService>();
 builder.Services.AddHostedService<OutboxPublisherService>();
+builder.Services.AddHostedService<TaskClaimsConsumerService>();
 
 builder.Services.AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));

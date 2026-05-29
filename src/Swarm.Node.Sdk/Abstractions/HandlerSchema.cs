@@ -1,4 +1,4 @@
-namespace Swarm.Node.Sdk.Abstractions;
+namespace Swarm.Sdk.Abstractions;
 
 /// <summary>
 /// Declared shape of a handler's configuration and runtime requirements.

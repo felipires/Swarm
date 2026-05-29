@@ -5,8 +5,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Swarm.Node.Data;
-using Swarm.Node.Sdk.Abstractions;
-using Swarm.Node.Sdk.Wire;
+using Swarm.Sdk.Abstractions;
+using Swarm.Sdk.Wire;
 using Swarm.Node.Services;
 using Xunit;
 

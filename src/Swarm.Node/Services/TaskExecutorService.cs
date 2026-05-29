@@ -4,9 +4,11 @@ using Microsoft.Data.Sqlite;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Swarm.Node.Data;
-using Swarm.Node.Sdk;
-using Swarm.Node.Sdk.Abstractions;
-using Swarm.Node.Sdk.Wire;
+using Swarm.Sdk;
+using Swarm.Sdk.Abstractions;
+using Swarm.Sdk.ValueResolution;
+using Swarm.Sdk.Wire;
+using Swarm.Node.ValueResolution;
 
 namespace Swarm.Node.Services;
 
@@ -21,6 +23,8 @@ public class TaskExecutorService : IAsyncDisposable
     private IChannel? _channel;
 
     public const string ResultQueueName = "task-results";
+    public const string ClaimQueueName = "task-claims";
+    public static string SharedQueueName(string taskType) => $"tasks.shared.{taskType}";
 
     public TaskExecutorService(
         AppDbConnection dbConnection,
@@ -72,19 +76,29 @@ public class TaskExecutorService : IAsyncDisposable
 
         _channel = await _rabbitConnection!.CreateChannelAsync(cancellationToken: stoppingToken);
 
-        var queueName = $"tasks.{nodeId}";
-        await _channel.QueueDeclareAsync(queue: queueName, durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
-        // task-results is owned by the Cluster (it carries DLX args per P0-5).
-        // We only publish to it, so we don't declare it here — a redeclare
-        // without matching args would fail with PRECONDITION_FAILED.
+        // task-results and task-claims are owned by the Cluster (DLX args per
+        // P0-5 / P0-3a). We only publish to them, so we don't declare them
+        // here — a redeclare with different args would fail PRECONDITION.
         await _channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false, cancellationToken: stoppingToken);
 
         var consumer = new AsyncEventingBasicConsumer(_channel);
         consumer.ReceivedAsync += (_, ea) => OnTaskReceived(ea, stoppingToken);
 
-        await _channel.BasicConsumeAsync(queue: queueName, autoAck: false, consumer: consumer, cancellationToken: stoppingToken);
+        // Always consume the per-node queue (SpecificNode / AllOnlineNodes / TaggedNodes Phase-1).
+        var perNodeQueue = $"tasks.{nodeId}";
+        await _channel.QueueDeclareAsync(queue: perNodeQueue, durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
+        await _channel.BasicConsumeAsync(queue: perNodeQueue, autoAck: false, consumer: consumer, cancellationToken: stoppingToken);
+        _logger.LogInformation("Subscribed to per-node queue '{Queue}'", perNodeQueue);
 
-        _logger.LogInformation("Task executor listening on queue '{Queue}'", queueName);
+        // P0-3a: also consume one shared queue per advertised TaskType so
+        // AnyOnlineNode dispatches load-balance across all online consumers.
+        foreach (var taskType in _registry.RegisteredTaskTypes)
+        {
+            var shared = SharedQueueName(taskType);
+            await _channel.QueueDeclareAsync(queue: shared, durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
+            await _channel.BasicConsumeAsync(queue: shared, autoAck: false, consumer: consumer, cancellationToken: stoppingToken);
+            _logger.LogInformation("Subscribed to shared queue '{Queue}'", shared);
+        }
     }
 
     private async Task OnTaskReceived(BasicDeliverEventArgs ea, CancellationToken cancellationToken)
@@ -102,7 +116,14 @@ public class TaskExecutorService : IAsyncDisposable
                 return;
             }
 
-            _logger.LogInformation("Received task {InstanceId} type={TaskType}", message.InstanceId, message.TaskType);
+            _logger.LogInformation("Received task {InstanceId} type={TaskType} (NodeId={NodeId})",
+                message.InstanceId, message.TaskType, message.NodeId);
+
+            // P0-3a: shared-queue messages carry no NodeId. Send a claim so the
+            // Cluster can bind the instance to this Node and transition the FSM
+            // to Claimed before the handler runs.
+            if (message.NodeId is null)
+                await PublishClaimAsync(message.InstanceId, cancellationToken);
 
             var localId = await SaveLocalTaskAsync(message);
             await UpdateLocalTaskStatusAsync(localId, "running");
@@ -171,8 +192,18 @@ public class TaskExecutorService : IAsyncDisposable
             }
         }
 
+        // P1-5a: pipeline pre-seeded with the three default sources. Handler
+        // code calls ctx.Resolver.InterpolateAsync(rawJson) on the config text
+        // it cares about, then parses the resolved JSON.
+        var pipeline = new ValueResolverPipeline(new IValueResolver[]
+        {
+            new EnvStoreResolver(),
+            new ParamResolver(runtimeParams),
+            new ConfigResolver(staticConfig),
+        });
+
         var handlerLogger = _loggerFactory.CreateLogger(handler.GetType());
-        var context = new TaskContext(message, staticConfig, runtimeParams, handlerLogger, cancellationToken);
+        var context = new TaskContext(message, staticConfig, runtimeParams, pipeline, handlerLogger, cancellationToken);
         return await handler.HandleAsync(context);
     }
 
@@ -221,6 +252,29 @@ public class TaskExecutorService : IAsyncDisposable
         };
 
         await _channel.BasicPublishAsync(exchange: "", routingKey: ResultQueueName, mandatory: false, basicProperties: props, body: body, cancellationToken: cancellationToken);
+    }
+
+    private async Task PublishClaimAsync(Guid instanceId, CancellationToken cancellationToken)
+    {
+        if (_channel == null) return;
+        if (!Guid.TryParse(_configuration["NodeId"], out var nodeGuid))
+        {
+            _logger.LogError("Cannot publish claim — NodeId is not configured");
+            return;
+        }
+
+        var claim = new TaskClaimMessage
+        {
+            InstanceId = instanceId,
+            NodeId = nodeGuid,
+            ClaimedAt = DateTime.UtcNow,
+        };
+        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(claim));
+        var props = new BasicProperties { Persistent = true, ContentType = "application/json" };
+
+        await _channel.BasicPublishAsync(
+            exchange: "", routingKey: ClaimQueueName, mandatory: false,
+            basicProperties: props, body: body, cancellationToken: cancellationToken);
     }
 
     public async ValueTask DisposeAsync()

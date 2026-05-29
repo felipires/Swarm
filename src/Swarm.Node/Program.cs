@@ -1,13 +1,14 @@
 using System.Reflection;
 using Serilog;
+using Swarm.Node.BackgroundServices;
+using Swarm.Node.Configuration;
 using Swarm.Node.Data;
 using Swarm.Node.Handlers;
 using Swarm.Node.Logging;
+using Swarm.Sdk.Abstractions;
+using Swarm.Sdk.DependencyInjection;
 using Swarm.Node.Services;
 using Grpc.Net.Client;
-using Swarm.Node.BackgroundServices;
-using Swarm.Node.Sdk.Abstractions;
-using Swarm.Node.Sdk.DependencyInjection;
 
 var configuration = new ConfigurationBuilder()
     .SetBasePath(Directory.GetCurrentDirectory())
@@ -49,6 +50,12 @@ var builder = Host.CreateDefaultBuilder(args)
             return GrpcChannel.ForAddress(clusterUrl, channelOptions);
         });
 
+        // Tag state (D6) — static layer is filled below; overlay layer is
+        // refreshed by HeartBeatService on every heartbeat response.
+        var tagState = new NodeTagState();
+        tagState.SetStatic(TagDiscovery.Discover(configuration));
+        services.AddSingleton(tagState);
+
         // Add services
         services.AddSingleton<BackgroundMaestro>();
         services.AddSingleton<AppDbConnection>();
@@ -56,8 +63,11 @@ var builder = Host.CreateDefaultBuilder(args)
         services.AddSingleton<HeartBeatService>();
         services.AddSingleton<TaskExecutorService>();
 
-        // Built-in task handlers
+        // Built-in task handlers (P1-5).
         services.AddTaskHandler<DefaultPassthroughHandler>();
+        services.AddTaskHandler<HttpHandlerV1>();
+        services.AddTaskHandler<SqlHandlerV1>();
+        services.AddTaskHandler<WebhookHandlerV1>();
 
         // Optional plugin scan: load ITaskHandler implementations from a directory.
         // TODO P4-3: trust model — Assembly.LoadFrom on an unsanitized path is unsafe

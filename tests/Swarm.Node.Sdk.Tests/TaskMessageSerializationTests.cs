@@ -1,9 +1,9 @@
 using System.Text.Json;
 using FluentAssertions;
-using Swarm.Node.Sdk.Wire;
+using Swarm.Sdk.Wire;
 using Xunit;
 
-namespace Swarm.Node.Sdk.Tests;
+namespace Swarm.Sdk.Tests;
 
 public class TaskMessageSerializationTests
 {

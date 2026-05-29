@@ -28,33 +28,67 @@ public class NodeService
     /// <summary>
     /// Register a new node with capabilities
     /// </summary>
-    public async Task<RequestNodeRegistrationResponse> RegisterNodeAsync(string apiKey, Guid? nodeId, Dictionary<string, string>? environmentTags = null)
+    public async Task<RequestNodeRegistrationResponse> RegisterNodeAsync(
+        string apiKey,
+        Guid? nodeId,
+        Dictionary<string, string>? staticTags = null,
+        IReadOnlyList<NodeCapability>? capabilities = null)
     {
         _logger.LogInformation("Registering node: {NodeName}", nodeId);
 
-        var existentNodeByName = await _dbContext.Nodes.Where(x => x.Id == nodeId).Select(x => x.Name).FirstOrDefaultAsync();
+        var resolvedId = nodeId ?? Guid.NewGuid();
+        var staticTagsJson = staticTags is not null ? JsonSerializer.Serialize(staticTags) : null;
 
-        var node = new Node
-        {
-            Id = nodeId ?? Guid.NewGuid(),
-            Name = existentNodeByName ?? GenerateNodeName(),
-            Status = Node.NodeStatus.Online,
-            CreatedAt = DateTime.UtcNow,
-            LastHeartbeatAt = DateTime.UtcNow,
-            EnvironmentTagsJson = environmentTags != null ? JsonSerializer.Serialize(environmentTags) : null
-        };
+        // Update-in-place when the row exists. Building a fresh Node and
+        // calling Update would (a) lose CreatedAt and (b) trip the EF change
+        // tracker if the entity was already materialized in this scope.
+        var node = nodeId is not null
+            ? await _dbContext.Nodes.FirstOrDefaultAsync(n => n.Id == resolvedId)
+            : null;
 
-        if (existentNodeByName != null)
+        if (node is not null)
         {
-            _dbContext.Nodes.Update(node);
-        } else
+            node.Status = Node.NodeStatus.Online;
+            node.LastHeartbeatAt = DateTime.UtcNow;
+            node.StaticTagsJson = staticTagsJson;
+        }
+        else
         {
+            node = new Node
+            {
+                Id = resolvedId,
+                Name = GenerateNodeName(),
+                Status = Node.NodeStatus.Online,
+                CreatedAt = DateTime.UtcNow,
+                LastHeartbeatAt = DateTime.UtcNow,
+                StaticTagsJson = staticTagsJson,
+            };
             _dbContext.Nodes.Add(node);
+        }
+
+        // P0-3b: capabilities are replaced wholesale on each registration.
+        // Wipe the old set, then add the new declarations.
+        var stale = await _dbContext.NodeCapabilities
+            .Where(c => c.NodeId == node.Id)
+            .ToListAsync();
+        _dbContext.NodeCapabilities.RemoveRange(stale);
+
+        if (capabilities is { Count: > 0 })
+        {
+            foreach (var cap in capabilities)
+            {
+                cap.Id = Guid.NewGuid();
+                cap.NodeId = node.Id;
+                cap.ReportedAt = DateTime.UtcNow;
+                _dbContext.NodeCapabilities.Add(cap);
+            }
         }
 
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("Node registered successfully: {NodeId} ({NodeName})", node.Id, node.Name);
+        _logger.LogInformation(
+            "Node registered successfully: {NodeId} ({NodeName}) — {CapabilityCount} capabilities reported",
+            node.Id, node.Name, capabilities?.Count ?? 0);
 
         return new RequestNodeRegistrationResponse()
         {
@@ -153,6 +187,71 @@ public class NodeService
             await _dbContext.SaveChangesAsync();
             _logger.LogInformation("Node deleted: {NodeId}", nodeId);
         }
+    }
+
+    /// <summary>
+    /// Read this node's overlay tag set. Returned to the Node on every
+    /// heartbeat response (D6 / P2-5).
+    /// </summary>
+    public async Task<Dictionary<string, string>> GetOverlayTagsAsync(Guid nodeId)
+    {
+        return await _dbContext.NodeOverlayTags
+            .Where(t => t.NodeId == nodeId)
+            .ToDictionaryAsync(t => t.Key, t => t.Value);
+    }
+
+    /// <summary>
+    /// Apply add/remove operations to a node's overlay tags. Adds upsert by
+    /// (NodeId, Key); removes delete by Key. Returns the merged effective
+    /// overlay tag set after the changes.
+    /// </summary>
+    public async Task<Dictionary<string, string>> UpdateOverlayTagsAsync(
+        Guid nodeId,
+        IReadOnlyDictionary<string, string>? add,
+        IReadOnlyList<string>? remove)
+    {
+        var nodeExists = await _dbContext.Nodes.AnyAsync(n => n.Id == nodeId);
+        if (!nodeExists)
+            throw new InvalidOperationException($"Node {nodeId} not found");
+
+        if (remove is { Count: > 0 })
+        {
+            var toRemove = await _dbContext.NodeOverlayTags
+                .Where(t => t.NodeId == nodeId && remove.Contains(t.Key))
+                .ToListAsync();
+            _dbContext.NodeOverlayTags.RemoveRange(toRemove);
+        }
+
+        if (add is { Count: > 0 })
+        {
+            var existing = await _dbContext.NodeOverlayTags
+                .Where(t => t.NodeId == nodeId && add.Keys.Contains(t.Key))
+                .ToListAsync();
+            var existingByKey = existing.ToDictionary(t => t.Key);
+
+            foreach (var (k, v) in add)
+            {
+                if (existingByKey.TryGetValue(k, out var row))
+                {
+                    row.Value = v;
+                    row.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    _dbContext.NodeOverlayTags.Add(new NodeOverlayTag
+                    {
+                        Id = Guid.NewGuid(),
+                        NodeId = nodeId,
+                        Key = k,
+                        Value = v,
+                        UpdatedAt = DateTime.UtcNow,
+                    });
+                }
+            }
+        }
+
+        await _dbContext.SaveChangesAsync();
+        return await GetOverlayTagsAsync(nodeId);
     }
 
     /// <summary>

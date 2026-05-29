@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
-using Swarm.Node.Sdk.Abstractions;
+using Swarm.Sdk.Abstractions;
 
-namespace Swarm.Node.Sdk.DependencyInjection;
+namespace Swarm.Sdk.DependencyInjection;
 
 public static class HandlerRegistration
 {

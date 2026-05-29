@@ -1,24 +1,31 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
+using Swarm.Cluster.Services;
+using Swarm.Node.Configuration;
 using Swarm.Node.Data;
 using Swarm.Node.Extensions;
-using Swarm.Node.Models.Dto;
+using Swarm.Sdk.Abstractions;
 using Grpc.Net.Client;
-using Swarm.Cluster.Services;
 
 namespace Swarm.Node.Services;
 
 /// <summary>
 /// Manages initial registration with cluster and periodic heartbeat
 /// </summary>
-public class RegistrationService(ILogger<RegistrationService> logger, IConfiguration configuration, AppDbConnection dbConnection, GrpcChannel grpcChannel)
+public class RegistrationService(
+    ILogger<RegistrationService> logger,
+    IConfiguration configuration,
+    AppDbConnection dbConnection,
+    GrpcChannel grpcChannel,
+    NodeTagState tagState,
+    IEnumerable<ITaskHandler> handlers)
 {
     private readonly string _apiKey = configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey is not configured");
     private readonly ILogger<RegistrationService> _logger = logger;
     private readonly IConfiguration _configuration = configuration;
     private readonly AppDbConnection _dbConnection = dbConnection;
     private readonly GrpcChannel _grpcChannel = grpcChannel;
+    private readonly NodeTagState _tagState = tagState;
+    private readonly IReadOnlyList<ITaskHandler> _handlers = handlers.ToList();
 
     // NodeId is resolved by NodeIdentityResolver in StartupService and
     // written into IConfiguration before any method here runs. Read it
@@ -63,15 +70,30 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
 
             var client = new NodesService.NodesServiceClient(_grpcChannel);
 
-            // EnvironmentTags previously serialized the entire IConfiguration —
-            // leaking ApiKey, RabbitMQ password, file paths, etc. to the Cluster.
-            // Sending an empty map until P2-5 introduces the proper static-tag
-            // discovery (SWARM_TAG_* env vars + Swarm:Tags appsettings section).
+            // P2-5: static_tags is the Node's deploy-time identity, discovered
+            // from SWARM_TAG_* env vars and the Swarm:Tags appsettings section.
+            // P0-3b: handlers carry the Node's executable capability set — the
+            // Cluster uses this for dispatch-time validation (P1-7).
             var request = new RegisterNodeRequest
             {
                 ApiKey = _apiKey,
                 NodeId = NodeId,
             };
+            foreach (var (k, v) in _tagState.Static)
+                request.StaticTags.Add(k, v);
+            foreach (var handler in _handlers)
+            {
+                var capability = new HandlerCapability
+                {
+                    TaskType = handler.TaskType,
+                    JsonSchema = handler.Schema.JsonSchema,
+                };
+                foreach (var key in handler.Schema.RequiredEnvKeys)
+                    capability.RequiredEnvKeys.Add(key);
+                foreach (var key in handler.Schema.RequiredParams)
+                    capability.RequiredParams.Add(key);
+                request.Handlers.Add(capability);
+            }
 
             _logger.LogDebug("Sending registration request for node: {NodeId}", NodeId);
             

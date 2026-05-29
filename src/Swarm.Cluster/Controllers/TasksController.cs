@@ -27,15 +27,7 @@ public class TasksController : ControllerBase
     {
         var tasks = await _db.TaskDefinitions
             .OrderByDescending(t => t.CreatedAt)
-            .Select(t => new TaskDefinitionResponse
-            {
-                Id = t.Id,
-                Name = t.Name,
-                Description = t.Description,
-                ConfigJson = t.ConfigJson,
-                CreatedAt = t.CreatedAt,
-                UpdatedAt = t.UpdatedAt
-            })
+            .Select(t => ToResponse(t))
             .ToListAsync();
 
         return Ok(tasks);
@@ -46,16 +38,7 @@ public class TasksController : ControllerBase
     {
         var t = await _db.TaskDefinitions.FindAsync(id);
         if (t == null) return NotFound();
-
-        return Ok(new TaskDefinitionResponse
-        {
-            Id = t.Id,
-            Name = t.Name,
-            Description = t.Description,
-            ConfigJson = t.ConfigJson,
-            CreatedAt = t.CreatedAt,
-            UpdatedAt = t.UpdatedAt
-        });
+        return Ok(ToResponse(t));
     }
 
     [HttpPost]
@@ -66,7 +49,12 @@ public class TasksController : ControllerBase
             Id = Guid.NewGuid(),
             Name = req.Name,
             Description = req.Description,
+            TaskType = req.TaskType,
             ConfigJson = req.ConfigJson,
+            DefaultStrategy = req.DefaultStrategy,
+            DefaultTargetTagsJson = req.DefaultTargetTags is { Count: > 0 }
+                ? System.Text.Json.JsonSerializer.Serialize(req.DefaultTargetTags)
+                : null,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -76,16 +64,21 @@ public class TasksController : ControllerBase
 
         _logger.LogInformation("Created task definition {Id} '{Name}'", task.Id, task.Name);
 
-        return CreatedAtAction(nameof(Get), new { id = task.Id }, new TaskDefinitionResponse
-        {
-            Id = task.Id,
-            Name = task.Name,
-            Description = task.Description,
-            ConfigJson = task.ConfigJson,
-            CreatedAt = task.CreatedAt,
-            UpdatedAt = task.UpdatedAt
-        });
+        return CreatedAtAction(nameof(Get), new { id = task.Id }, ToResponse(task));
     }
+
+    private static TaskDefinitionResponse ToResponse(TaskDefinition t) => new()
+    {
+        Id = t.Id,
+        Name = t.Name,
+        Description = t.Description,
+        TaskType = t.TaskType,
+        ConfigJson = t.ConfigJson,
+        DefaultStrategy = t.DefaultStrategy,
+        DefaultTargetTagsJson = t.DefaultTargetTagsJson,
+        CreatedAt = t.CreatedAt,
+        UpdatedAt = t.UpdatedAt
+    };
 
     [HttpDelete("{id}")]
     public async Task<ActionResult> Delete(Guid id)
@@ -98,14 +91,25 @@ public class TasksController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Dispatch a task to a specific node.</summary>
+    /// <summary>
+    /// Dispatch a task instance. Strategy defaults to the TaskDefinition's
+    /// <c>DefaultStrategy</c>; tag selector and target NodeId can override
+    /// the definition-level defaults.
+    /// </summary>
     [HttpPost("{id}/dispatch")]
     public async Task<ActionResult<TaskInstanceResponse>> Dispatch(Guid id, [FromBody] DispatchTaskRequest req)
     {
         try
         {
-            var instance = await _dispatch.DispatchAsync(id, req.NodeId);
+            var runtimeParamsJson = req.RuntimeParams is { ValueKind: System.Text.Json.JsonValueKind.Object }
+                ? req.RuntimeParams.Value.GetRawText()
+                : null;
+            var instance = await _dispatch.DispatchAsync(id, req.NodeId, req.Strategy, req.TargetTags, runtimeParamsJson);
             return Ok(TaskInstanceResponse.From(instance));
+        }
+        catch (Swarm.Cluster.Validation.DispatchValidationException ex)
+        {
+            return BadRequest(new { code = ex.Code, error = ex.Message, details = ex.Details });
         }
         catch (InvalidOperationException ex)
         {

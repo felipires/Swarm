@@ -1,15 +1,22 @@
 using Grpc.Net.Client;
 using Swarm.Cluster.Services;
+using Swarm.Node.Configuration;
 
 namespace Swarm.Node.Services;
 
-public class HeartBeatService(IConfiguration configuration, GrpcChannel grpcChannel, ILogger<HeartBeatService> logger, RegistrationService registrationService)
+public class HeartBeatService(
+    IConfiguration configuration,
+    GrpcChannel grpcChannel,
+    ILogger<HeartBeatService> logger,
+    RegistrationService registrationService,
+    NodeTagState tagState)
 {
     private readonly string _apiKey = configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey is not configured");
     private readonly IConfiguration _configuration = configuration;
     private readonly ILogger<HeartBeatService> _logger = logger;
     private readonly GrpcChannel _grpcChannel = grpcChannel;
     private readonly RegistrationService _registrationService = registrationService;
+    private readonly NodeTagState _tagState = tagState;
 
     // P2-1: NodeId is published into IConfiguration by NodeIdentityResolver
     // before any heartbeat fires. Read on demand so this singleton doesn't
@@ -35,6 +42,9 @@ public class HeartBeatService(IConfiguration configuration, GrpcChannel grpcChan
                 _logger.LogWarning("Cluster does not recognise this node, re-registering");
                 await _registrationService.ForceRegisterWithClusterAsync();
             }
+
+            // P2-5: refresh overlay tags from the Cluster on every heartbeat.
+            _tagState.SetOverlay(response.OverlayTags);
 
             return response.Success;
         }

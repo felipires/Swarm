@@ -1,5 +1,5 @@
 using FluentAssertions;
-using Swarm.Node.Sdk.Abstractions;
+using Swarm.Sdk.Abstractions;
 using Swarm.Node.Services;
 using Xunit;
 

@@ -1,5 +1,3 @@
-using System;
-
 namespace Swarm.Cluster.Models;
 
 public class Node
@@ -9,7 +7,14 @@ public class Node
     public NodeStatus Status { get; set; } = NodeStatus.Offline;
     public DateTime CreatedAt { get; set; }
     public DateTime LastHeartbeatAt { get; set; }
-    public string? EnvironmentTagsJson { get; set; } // JSON serialized environment tags
+
+    /// <summary>
+    /// Node-local static tags reported at registration (D6). JSON-serialized
+    /// <c>Dictionary&lt;string, string&gt;</c>. Replaces the old
+    /// <c>EnvironmentTagsJson</c> which serialized the entire IConfiguration.
+    /// Overlay tags live in <see cref="NodeOverlayTag"/>.
+    /// </summary>
+    public string? StaticTagsJson { get; set; }
 
     public enum NodeStatus
     {

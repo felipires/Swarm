@@ -4,7 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>Swarm.Node.Sdk</RootNamespace>
+    <RootNamespace>Swarm.Sdk</RootNamespace>
     <AssemblyName>Swarm.Node.Sdk</AssemblyName>
     <IsPackable>true</IsPackable>
     <PackageId>Swarm.Node.Sdk</PackageId>

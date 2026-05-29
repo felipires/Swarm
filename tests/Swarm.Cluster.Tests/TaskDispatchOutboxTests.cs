@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.Models;
 using Swarm.Cluster.Services;
+using Swarm.Sdk.Wire;
 using Xunit;
 
 namespace Swarm.Cluster.Tests;

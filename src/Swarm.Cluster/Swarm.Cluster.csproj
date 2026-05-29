@@ -34,4 +34,8 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Swarm.Node.Sdk\Swarm.Node.Sdk.csproj" />
+  </ItemGroup>
+
 </Project>

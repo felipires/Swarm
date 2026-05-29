@@ -15,6 +15,19 @@ public class TaskDefinition
     /// </summary>
     public string TaskType { get; set; } = "default@1";
 
+    /// <summary>
+    /// Default dispatch strategy when a dispatch request doesn't pick one.
+    /// Defaults to <see cref="DispatchStrategy.SpecificNode"/> to preserve the
+    /// existing behavior (named NodeId at dispatch).
+    /// </summary>
+    public DispatchStrategy DefaultStrategy { get; set; } = DispatchStrategy.SpecificNode;
+
+    /// <summary>
+    /// Default tag selector (JSON-encoded <c>Dictionary&lt;string, string&gt;</c>)
+    /// for <see cref="DispatchStrategy.TaggedNodes"/>. Ignored for other strategies.
+    /// </summary>
+    public string? DefaultTargetTagsJson { get; set; }
+
     /// <summary>JSON payload passed to the node when executing this task.</summary>
     public string ConfigJson { get; set; } = "{}";
 

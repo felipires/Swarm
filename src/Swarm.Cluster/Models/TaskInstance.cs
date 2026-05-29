@@ -4,7 +4,12 @@ public class TaskInstance
 {
     public Guid Id { get; set; }
     public Guid TaskDefinitionId { get; set; }
-    public Guid NodeId { get; set; }
+
+    /// <summary>
+    /// Target Node. NULL until a shared-queue strategy (D1) sees a Node claim
+    /// the message; set immediately at dispatch for per-node strategies.
+    /// </summary>
+    public Guid? NodeId { get; set; }
 
     /// <summary>
     /// Current status. The setter is private — use <see cref="Transition"/>
@@ -13,6 +18,13 @@ public class TaskInstance
     /// EF Core materializes via the private setter through its convention.
     /// </summary>
     public TaskInstanceStatus Status { get; private set; } = TaskInstanceStatus.Pending;
+
+    /// <summary>
+    /// JSON-encoded per-run runtime parameters (P1-6). Snapshotted at
+    /// dispatch time — subsequent edits to the TaskDefinition do not affect
+    /// in-flight instances.
+    /// </summary>
+    public string? RuntimeParamsJson { get; set; }
 
     public string? ResultJson { get; set; }
     public string? ErrorMessage { get; set; }

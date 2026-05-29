@@ -23,11 +23,21 @@ public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.Node
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid node ID format"));
         }
 
-        var environmentTags = request.EnvironmentTags?.Count > 0 
-            ? request.EnvironmentTags.ToDictionary(x => x.Key, x => x.Value)
+        var staticTags = request.StaticTags?.Count > 0
+            ? request.StaticTags.ToDictionary(x => x.Key, x => x.Value)
             : null;
 
-        var response = await _nodeService.RegisterNodeAsync(request.ApiKey, nodeId, environmentTags);
+        var capabilities = request.Handlers?
+            .Select(h => new Swarm.Cluster.Models.NodeCapability
+            {
+                TaskType = h.TaskType,
+                JsonSchema = string.IsNullOrEmpty(h.JsonSchema) ? "{}" : h.JsonSchema,
+                RequiredEnvKeysJson = System.Text.Json.JsonSerializer.Serialize(h.RequiredEnvKeys),
+                RequiredParamsJson = System.Text.Json.JsonSerializer.Serialize(h.RequiredParams),
+            })
+            .ToList();
+
+        var response = await _nodeService.RegisterNodeAsync(request.ApiKey, nodeId, staticTags, capabilities);
 
         return new RegisterNodeResponse
         {
@@ -58,8 +68,12 @@ public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.Node
 
         var known = await _nodeService.UpdateHeartbeatAsync(nodeId, request.IsOnline);
 
-        return known
-            ? new RecordHeartbeatResponse { Success = true, Message = "Heartbeat recorded successfully" }
-            : new RecordHeartbeatResponse { Success = false, Message = "NodeNotFound" };
+        if (!known)
+            return new RecordHeartbeatResponse { Success = false, Message = "NodeNotFound" };
+
+        var response = new RecordHeartbeatResponse { Success = true, Message = "Heartbeat recorded successfully" };
+        foreach (var (k, v) in await _nodeService.GetOverlayTagsAsync(nodeId))
+            response.OverlayTags.Add(k, v);
+        return response;
     }
 }

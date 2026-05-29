@@ -12,7 +12,23 @@ service NodesService {
 message RegisterNodeRequest {
   string api_key = 1;
   string node_id = 2;
-  map<string, string> environment_tags = 3;
+  // Node-local static tags (D6): SWARM_TAG_* env vars + Swarm:Tags appsettings.
+  // Replaces the legacy environment_tags field which leaked the full IConfiguration.
+  map<string, string> static_tags = 3;
+  // Handlers this Node is willing to execute (P0-3b). Reported wholesale on
+  // every registration — the Cluster replaces this Node's capability rows.
+  repeated HandlerCapability handlers = 4;
+}
+
+message HandlerCapability {
+  // TaskType identifier including version per D3 (e.g. "http@1").
+  string task_type = 1;
+  // JSON Schema (draft 2020-12) describing the handler's ConfigJson shape.
+  string json_schema = 2;
+  // Env keys the handler requires in the Node's env store (resolved by P1-5a).
+  repeated string required_env_keys = 3;
+  // Runtime param keys the handler requires at dispatch time.
+  repeated string required_params = 4;
 }
 
 message RemoteParameters {
@@ -37,4 +53,7 @@ message RecordHeartbeatRequest {
 message RecordHeartbeatResponse {
   bool success = 1;
   string message = 2;
+  // Cluster-managed overlay tags (D6) pushed to the Node on every heartbeat.
+  // Node merges with its static tags; static wins on key conflict.
+  map<string, string> overlay_tags = 3;
 }
