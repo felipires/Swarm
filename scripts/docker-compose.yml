@@ -96,7 +96,7 @@ services:
 
   frontend:
     build:
-      context: ./Frontend
+      context: ./../src/frontend
       dockerfile: Dockerfile
     ports:
       - "5173:5173"
