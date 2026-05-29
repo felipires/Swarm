@@ -4,6 +4,9 @@ using Microsoft.Data.Sqlite;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Swarm.Node.Data;
+using Swarm.Node.Sdk;
+using Swarm.Node.Sdk.Abstractions;
+using Swarm.Node.Sdk.Wire;
 
 namespace Swarm.Node.Services;
 
@@ -12,16 +15,28 @@ public class TaskExecutorService : IAsyncDisposable
     private readonly AppDbConnection _dbConnection;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TaskExecutorService> _logger;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly HandlerRegistry _registry;
     private IConnection? _rabbitConnection;
     private IChannel? _channel;
 
     public const string ResultQueueName = "task-results";
 
-    public TaskExecutorService(AppDbConnection dbConnection, IConfiguration configuration, ILogger<TaskExecutorService> logger)
+    public TaskExecutorService(
+        AppDbConnection dbConnection,
+        IConfiguration configuration,
+        ILogger<TaskExecutorService> logger,
+        ILoggerFactory loggerFactory,
+        IEnumerable<ITaskHandler> handlers)
     {
         _dbConnection = dbConnection;
         _configuration = configuration;
         _logger = logger;
+        _loggerFactory = loggerFactory;
+        _registry = new HandlerRegistry(handlers);
+
+        foreach (var taskType in _registry.RegisteredTaskTypes)
+            _logger.LogInformation("Registered handler {TaskType}", taskType);
     }
 
     public async Task StartAsync(CancellationToken stoppingToken)
@@ -85,15 +100,21 @@ public class TaskExecutorService : IAsyncDisposable
                 return;
             }
 
-            _logger.LogInformation("Received task {InstanceId}", message.InstanceId);
+            _logger.LogInformation("Received task {InstanceId} type={TaskType}", message.InstanceId, message.TaskType);
 
             var localId = await SaveLocalTaskAsync(message);
             await UpdateLocalTaskStatusAsync(localId, "running");
 
-            var result = await ExecuteAsync(message, cancellationToken);
+            var result = await DispatchAsync(message, cancellationToken);
 
             await UpdateLocalTaskStatusAsync(localId, result.Success ? "completed" : "failed");
-            await PublishResultAsync(result, cancellationToken);
+            await PublishResultAsync(new TaskResultMessage
+            {
+                InstanceId = message.InstanceId,
+                Success = result.Success,
+                ResultJson = result.ResultJson,
+                ErrorMessage = result.ErrorMessage,
+            }, cancellationToken);
 
             await _channel!.BasicAckAsync(ea.DeliveryTag, false, cancellationToken);
 
@@ -114,20 +135,43 @@ public class TaskExecutorService : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Override to provide actual task execution logic.
-    /// Default is a no-op that succeeds immediately.
-    /// </summary>
-    protected virtual Task<TaskResultMessage> ExecuteAsync(TaskMessage message, CancellationToken cancellationToken)
+    internal async Task<TaskResult> DispatchAsync(TaskMessage message, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Executing task {InstanceId} with config: {Config}", message.InstanceId, message.ConfigJson);
+        if (!TaskTypeId.TryParse(message.TaskType, out _))
+            return new TaskResult(false, ErrorMessage: $"INVALID_TASKTYPE: '{message.TaskType}'");
 
-        return Task.FromResult(new TaskResultMessage
+        if (!_registry.TryGet(message.TaskType, out var handler))
         {
-            InstanceId = message.InstanceId,
-            Success = true,
-            ResultJson = JsonSerializer.Serialize(new { executed = true, instanceId = message.InstanceId })
-        });
+            _logger.LogError("No handler registered for TaskType {TaskType}", message.TaskType);
+            return new TaskResult(false, ErrorMessage: $"UNSUPPORTED_TASK_TYPE: '{message.TaskType}'");
+        }
+
+        JsonElement staticConfig;
+        try
+        {
+            staticConfig = JsonSerializer.Deserialize<JsonElement>(message.ConfigJson);
+        }
+        catch (JsonException ex)
+        {
+            return new TaskResult(false, ErrorMessage: $"INVALID_CONFIG_JSON: {ex.Message}");
+        }
+
+        JsonElement runtimeParams = default;
+        if (!string.IsNullOrEmpty(message.RuntimeParamsJson))
+        {
+            try
+            {
+                runtimeParams = JsonSerializer.Deserialize<JsonElement>(message.RuntimeParamsJson);
+            }
+            catch (JsonException ex)
+            {
+                return new TaskResult(false, ErrorMessage: $"INVALID_PARAMS_JSON: {ex.Message}");
+            }
+        }
+
+        var handlerLogger = _loggerFactory.CreateLogger(handler.GetType());
+        var context = new TaskContext(message, staticConfig, runtimeParams, handlerLogger, cancellationToken);
+        return await handler.HandleAsync(context);
     }
 
     private async Task<Guid> SaveLocalTaskAsync(TaskMessage message)
@@ -182,20 +226,4 @@ public class TaskExecutorService : IAsyncDisposable
         if (_channel != null) await _channel.DisposeAsync();
         if (_rabbitConnection != null) await _rabbitConnection.DisposeAsync();
     }
-}
-
-public record TaskMessage
-{
-    public Guid InstanceId { get; init; }
-    public Guid TaskDefinitionId { get; init; }
-    public Guid NodeId { get; init; }
-    public string ConfigJson { get; init; } = "{}";
-}
-
-public record TaskResultMessage
-{
-    public Guid InstanceId { get; init; }
-    public bool Success { get; init; }
-    public string? ResultJson { get; init; }
-    public string? ErrorMessage { get; init; }
 }

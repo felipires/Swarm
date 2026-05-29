@@ -39,4 +39,12 @@
     <Protobuf Include="Protos\*.proto" GrpcServices="Client" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Swarm.Node.Sdk\Swarm.Node.Sdk.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Swarm.Node.Tests" />
+  </ItemGroup>
+
 </Project>

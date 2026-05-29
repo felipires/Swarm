@@ -6,6 +6,15 @@ public class TaskDefinition
     public string Name { get; set; } = null!;
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Task type identifier including version (e.g. <c>"http@1"</c>). Always
+    /// carries an explicit version per roadmap decision D3 — schema changes
+    /// produce a new version, never a mutation of an existing one. Defaults
+    /// to <c>"default@1"</c> so pre-versioning rows continue to dispatch
+    /// against the built-in passthrough handler.
+    /// </summary>
+    public string TaskType { get; set; } = "default@1";
+
     /// <summary>JSON payload passed to the node when executing this task.</summary>
     public string ConfigJson { get; set; } = "{}";
 

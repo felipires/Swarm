@@ -1,8 +1,14 @@
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Node", "Node.csproj", "{33CE3EA8-9D4E-C60E-963B-7C30E0A49730}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swarm.Node.Sdk", "..\Swarm.Node.Sdk\Swarm.Node.Sdk.csproj", "{8520834D-938B-4582-A561-EC1306F33DAA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swarm.Node.Sdk.Tests", "..\Swarm.Node.Sdk.Tests\Swarm.Node.Sdk.Tests.csproj", "{EA53071A-DA34-4B30-A5BC-7714E549B606}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swarm.Node.Tests", "..\Swarm.Node.Tests\Swarm.Node.Tests.csproj", "{CAA56B32-6215-470E-88D2-03539778D477}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -14,6 +20,18 @@ Global
 		{33CE3EA8-9D4E-C60E-963B-7C30E0A49730}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{33CE3EA8-9D4E-C60E-963B-7C30E0A49730}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{33CE3EA8-9D4E-C60E-963B-7C30E0A49730}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8520834D-938B-4582-A561-EC1306F33DAA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8520834D-938B-4582-A561-EC1306F33DAA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8520834D-938B-4582-A561-EC1306F33DAA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8520834D-938B-4582-A561-EC1306F33DAA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EA53071A-DA34-4B30-A5BC-7714E549B606}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EA53071A-DA34-4B30-A5BC-7714E549B606}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EA53071A-DA34-4B30-A5BC-7714E549B606}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EA53071A-DA34-4B30-A5BC-7714E549B606}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CAA56B32-6215-470E-88D2-03539778D477}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CAA56B32-6215-470E-88D2-03539778D477}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CAA56B32-6215-470E-88D2-03539778D477}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CAA56B32-6215-470E-88D2-03539778D477}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

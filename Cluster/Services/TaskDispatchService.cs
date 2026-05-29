@@ -43,13 +43,7 @@ public class TaskDispatchService
         _dbContext.TaskInstances.Add(instance);
         await _dbContext.SaveChangesAsync();
 
-        var message = new TaskMessage
-        {
-            InstanceId = instance.Id,
-            TaskDefinitionId = taskDefinitionId,
-            NodeId = nodeId,
-            ConfigJson = definition.ConfigJson
-        };
+        var message = BuildMessage(instance, definition);
 
         PublishToNode(nodeId, message);
 
@@ -78,6 +72,15 @@ public class TaskDispatchService
         return results;
     }
 
+    internal static TaskMessage BuildMessage(TaskInstance instance, TaskDefinition definition) => new()
+    {
+        InstanceId = instance.Id,
+        TaskDefinitionId = definition.Id,
+        NodeId = instance.NodeId,
+        TaskType = definition.TaskType,
+        ConfigJson = definition.ConfigJson,
+    };
+
     private void PublishToNode(Guid nodeId, TaskMessage message)
     {
         using var channel = _rabbitConnection.CreateModel();
@@ -101,5 +104,13 @@ public record TaskMessage
     public Guid InstanceId { get; init; }
     public Guid TaskDefinitionId { get; init; }
     public Guid NodeId { get; init; }
+
+    /// <summary>
+    /// Task type identifier including version (roadmap D3). Defaults to
+    /// <c>"default@1"</c> so messages from a pre-versioning Cluster build
+    /// remain wire-compatible on the Node side.
+    /// </summary>
+    public string TaskType { get; init; } = "default@1";
+
     public string ConfigJson { get; init; } = "{}";
 }

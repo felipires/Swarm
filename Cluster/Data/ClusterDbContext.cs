@@ -42,6 +42,7 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.TaskType).IsRequired().HasMaxLength(255).HasDefaultValue("default@1");
             entity.Property(e => e.ConfigJson).IsRequired().HasDefaultValue("{}");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()").IsRequired();
