@@ -6,6 +6,7 @@ using Serilog;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.GrpcServices;
 using Swarm.Cluster.Logging;
+using Swarm.Cluster.Middleware;
 using Swarm.Cluster.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -112,6 +113,10 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// P3-2: global ApiError translator. Must come before any endpoint mapping
+// so exceptions from controllers/middleware run through it.
+app.UseSwarmErrorHandler();
 
 if (app.Environment.IsDevelopment())
 {

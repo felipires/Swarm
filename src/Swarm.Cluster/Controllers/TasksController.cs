@@ -37,7 +37,7 @@ public class TasksController : ControllerBase
     public async Task<ActionResult<TaskDefinitionResponse>> Get(Guid id)
     {
         var t = await _db.TaskDefinitions.FindAsync(id);
-        if (t == null) return NotFound();
+        if (t == null) return NotFound(new ApiError("TASK_NOT_FOUND", $"TaskDefinition {id} not found"));
         return Ok(ToResponse(t));
     }
 
@@ -84,7 +84,7 @@ public class TasksController : ControllerBase
     public async Task<ActionResult> Delete(Guid id)
     {
         var task = await _db.TaskDefinitions.FindAsync(id);
-        if (task == null) return NotFound();
+        if (task == null) return NotFound(new ApiError("TASK_NOT_FOUND", $"TaskDefinition {id} not found"));
 
         _db.TaskDefinitions.Remove(task);
         await _db.SaveChangesAsync();
@@ -99,37 +99,21 @@ public class TasksController : ControllerBase
     [HttpPost("{id}/dispatch")]
     public async Task<ActionResult<TaskInstanceResponse>> Dispatch(Guid id, [FromBody] DispatchTaskRequest req)
     {
-        try
-        {
-            var runtimeParamsJson = req.RuntimeParams is { ValueKind: System.Text.Json.JsonValueKind.Object }
-                ? req.RuntimeParams.Value.GetRawText()
-                : null;
-            var instance = await _dispatch.DispatchAsync(id, req.NodeId, req.Strategy, req.TargetTags, runtimeParamsJson);
-            return Ok(TaskInstanceResponse.From(instance));
-        }
-        catch (Swarm.Cluster.Validation.DispatchValidationException ex)
-        {
-            return BadRequest(new { code = ex.Code, error = ex.Message, details = ex.Details });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        // ErrorHandlingMiddleware (P3-2) translates exceptions thrown below
+        // into a structured ApiError response. No per-action try/catch needed.
+        var runtimeParamsJson = req.RuntimeParams is { ValueKind: System.Text.Json.JsonValueKind.Object }
+            ? req.RuntimeParams.Value.GetRawText()
+            : null;
+        var instance = await _dispatch.DispatchAsync(id, req.NodeId, req.Strategy, req.TargetTags, runtimeParamsJson);
+        return Ok(TaskInstanceResponse.From(instance));
     }
 
     /// <summary>Dispatch a task to all currently online nodes.</summary>
     [HttpPost("{id}/dispatch-all")]
     public async Task<ActionResult<List<TaskInstanceResponse>>> DispatchAll(Guid id)
     {
-        try
-        {
-            var instances = await _dispatch.DispatchToAllOnlineAsync(id);
-            return Ok(instances.Select(TaskInstanceResponse.From));
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        var instances = await _dispatch.DispatchToAllOnlineAsync(id);
+        return Ok(instances.Select(TaskInstanceResponse.From));
     }
 
     /// <summary>Get all instances for a task definition.</summary>
@@ -149,7 +133,7 @@ public class TasksController : ControllerBase
     public async Task<ActionResult<TaskInstanceResponse>> GetInstance(Guid instanceId)
     {
         var instance = await _db.TaskInstances.FindAsync(instanceId);
-        if (instance == null) return NotFound();
+        if (instance == null) return NotFound(new ApiError("INSTANCE_NOT_FOUND", $"TaskInstance {instanceId} not found"));
         return Ok(TaskInstanceResponse.From(instance));
     }
 }

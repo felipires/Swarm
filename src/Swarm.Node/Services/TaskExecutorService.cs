@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Swarm.Node.Data;
+using Swarm.Node.Logging;
 using Swarm.Sdk;
 using Swarm.Sdk.Abstractions;
 using Swarm.Sdk.ValueResolution;
@@ -204,6 +205,11 @@ public class TaskExecutorService : IAsyncDisposable
 
         var handlerLogger = _loggerFactory.CreateLogger(handler.GetType());
         var context = new TaskContext(message, staticConfig, runtimeParams, pipeline, handlerLogger, cancellationToken);
+
+        // P4-2a: expose the pipeline to the Serilog redaction enricher for the
+        // duration of this handler invocation. Secrets resolved by the handler
+        // are scrubbed from any log event emitted before the scope ends.
+        using var redactionScope = SecretRedactionContext.Push(pipeline);
         return await handler.HandleAsync(context);
     }
 

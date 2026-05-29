@@ -54,7 +54,7 @@ public class NodesController : ControllerBase
         if (node == null)
         {
             _logger.LogWarning("Node not found: {NodeId}", id);
-            return NotFound(new { error = "Node not found" });
+            return NotFound(new ApiError("NODE_NOT_FOUND", $"Node {id} not found"));
         }
 
         var response = new NodeResponse
@@ -80,7 +80,7 @@ public class NodesController : ControllerBase
         var node = await _nodeService.GetNodeByIdAsync(id);
         if (node == null)
         {
-            return NotFound(new { error = "Node not found" });
+            return NotFound(new ApiError("NODE_NOT_FOUND", $"Node {id} not found"));
         }
 
         await _nodeService.DeleteNodeAsync(id);
@@ -95,15 +95,10 @@ public class NodesController : ControllerBase
     [HttpPatch("{id}/tags")]
     public async Task<ActionResult<Dictionary<string, string>>> UpdateOverlayTags(Guid id, [FromBody] UpdateOverlayTagsRequest body)
     {
-        try
-        {
-            var effective = await _nodeService.UpdateOverlayTagsAsync(id, body.Add, body.Remove);
-            return Ok(effective);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(new { error = ex.Message });
-        }
+        // ErrorHandlingMiddleware (P3-2) maps NodeService's
+        // InvalidOperationException ("Node not found") into a 400 ApiError.
+        var effective = await _nodeService.UpdateOverlayTagsAsync(id, body.Add, body.Remove);
+        return Ok(effective);
     }
 }
 

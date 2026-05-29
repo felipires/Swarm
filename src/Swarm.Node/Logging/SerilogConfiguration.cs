@@ -14,6 +14,7 @@ public static class SerilogConfiguration
             .Enrich.FromLogContext()
             .Enrich.WithMachineName()
             .Enrich.WithThreadId()
+            .Enrich.With<SecretRedactionEnricher>() // P4-2a — scrub :secret values
             .Enrich.WithProperty("Application", "Swarm.Node")
             .Enrich.WithProperty("NodeId", nodeId);
     }
