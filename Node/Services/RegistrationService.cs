@@ -14,12 +14,18 @@ namespace Swarm.Node.Services;
 /// </summary>
 public class RegistrationService(ILogger<RegistrationService> logger, IConfiguration configuration, AppDbConnection dbConnection, GrpcChannel grpcChannel)
 {
-    private readonly string _nodeId = configuration["NodeId"] ?? throw new InvalidOperationException("NodeId is not configured");
     private readonly string _apiKey = configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey is not configured");
     private readonly ILogger<RegistrationService> _logger = logger;
     private readonly IConfiguration _configuration = configuration;
     private readonly AppDbConnection _dbConnection = dbConnection;
     private readonly GrpcChannel _grpcChannel = grpcChannel;
+
+    // NodeId is resolved by NodeIdentityResolver in StartupService and
+    // written into IConfiguration before any method here runs. Read it
+    // on demand so this singleton doesn't capture an empty string at
+    // construction time (which happens before StartupService.StartAsync).
+    private string NodeId => _configuration["NodeId"]
+        ?? throw new InvalidOperationException("NodeId is not yet resolved");
 
     public async Task<bool> RegisterWithClusterAsync()
     {
@@ -47,7 +53,7 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
                 var reconnectClient = new NodesService.NodesServiceClient(_grpcChannel);
                 await reconnectClient.RecordHeartbeatAsync(new RecordHeartbeatRequest
                 {
-                    NodeId = _nodeId,
+                    NodeId = NodeId,
                     ApiKey = _apiKey,
                     IsOnline = true
                 });
@@ -64,10 +70,10 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
             var request = new RegisterNodeRequest
             {
                 ApiKey = _apiKey,
-                NodeId = _nodeId,
+                NodeId = NodeId,
             };
 
-            _logger.LogDebug("Sending registration request for node: {NodeId}", _nodeId);
+            _logger.LogDebug("Sending registration request for node: {NodeId}", NodeId);
             
             var response = await client.RegisterNodeAsync(request);
 
@@ -135,7 +141,7 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
             var client = new NodesService.NodesServiceClient(_grpcChannel);
             var request = new RecordHeartbeatRequest
             {
-                NodeId = _nodeId,
+                NodeId = NodeId,
                 ApiKey = _apiKey,
                 IsOnline = false
             };

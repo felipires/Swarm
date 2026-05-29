@@ -45,6 +45,14 @@ public class StartupService(
         {
             await _dbConnection.SetupDatabaseAsync();
 
+            // P2-1: resolve the persistent NodeId from local SQLite (or
+            // generate one on first startup) and publish it into the
+            // IConfiguration so every downstream consumer — RegistrationService,
+            // HeartBeatService, TaskExecutorService, Serilog enrichers —
+            // reads the same value.
+            var nodeId = await NodeIdentityResolver.ResolveAsync(_dbConnection, _logger);
+            _configuration["NodeId"] = nodeId.ToString();
+
             var registered = await _registrationService.RegisterWithClusterAsync();
 
             if (!registered)
