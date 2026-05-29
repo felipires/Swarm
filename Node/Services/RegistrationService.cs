@@ -55,15 +55,16 @@ public class RegistrationService(ILogger<RegistrationService> logger, IConfigura
                 return true;
             }
 
-            var client = new NodesService.NodesServiceClient(_grpcChannel);            
-            var envVars = _configuration.AsEnumerable()
-                .ToDictionary(kv => kv.Key, kv => kv.Value ?? "");
-            
+            var client = new NodesService.NodesServiceClient(_grpcChannel);
+
+            // EnvironmentTags previously serialized the entire IConfiguration —
+            // leaking ApiKey, RabbitMQ password, file paths, etc. to the Cluster.
+            // Sending an empty map until P2-5 introduces the proper static-tag
+            // discovery (SWARM_TAG_* env vars + Swarm:Tags appsettings section).
             var request = new RegisterNodeRequest
             {
                 ApiKey = _apiKey,
                 NodeId = _nodeId,
-                EnvironmentTags = { envVars }
             };
 
             _logger.LogDebug("Sending registration request for node: {NodeId}", _nodeId);

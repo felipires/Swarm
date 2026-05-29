@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Swarm.Cluster.Attributes;
 using Swarm.Cluster.Models;
 using Swarm.Cluster.Models.Dto;
 using Swarm.Cluster.Services;
@@ -23,7 +22,6 @@ public class NodesController : ControllerBase
     /// Get all nodes
     /// </summary>
     [HttpGet]
-    // [ApiKeyRequired]
     public async Task<ActionResult<List<NodeResponse>>> GetNodes([FromQuery] Node.NodeStatus? status = null)
     {
         _logger.LogInformation("Fetching nodes with status filter: {Status}", status?.ToString() ?? "all");
@@ -46,7 +44,6 @@ public class NodesController : ControllerBase
     /// Get a specific node by ID
     /// </summary>
     [HttpGet("{id}")]
-    // [ApiKeyRequired]
     public async Task<ActionResult<NodeResponse>> GetNode(Guid id)
     {
         _logger.LogInformation("Fetching node: {NodeId}", id);
@@ -71,14 +68,13 @@ public class NodesController : ControllerBase
     }
 
     /// <summary>
-    /// Delete a node   
+    /// Delete a node
     /// </summary>
-    // [ApiKeyRequired]
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteNode(Guid id)
     {
         _logger.LogInformation("Deleting node: {NodeId}", id);
-        
+
         var node = await _nodeService.GetNodeByIdAsync(id);
         if (node == null)
         {
@@ -87,17 +83,6 @@ public class NodesController : ControllerBase
 
         await _nodeService.DeleteNodeAsync(id);
         return Ok(new { message = "Node deleted successfully" });
-    }
-
-    /// <summary>
-    /// Trigger offline node detection (can be called periodically via scheduler)
-    /// </summary>
-    [HttpPost("check-offline")]
-    public async Task<ActionResult> CheckOfflineNodes()
-    {
-        _logger.LogInformation("Running offline node detection");
-        await _nodeService.MarkOfflineNodesAsync();
-        return Ok(new { message = "Offline node detection completed" });
     }
 }
 

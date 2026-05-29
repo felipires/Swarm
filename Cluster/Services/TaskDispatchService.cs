@@ -1,22 +1,26 @@
-using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using RabbitMQ.Client;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.Models;
 
 namespace Swarm.Cluster.Services;
 
+/// <summary>
+/// Records a dispatch decision atomically. Inserts the <see cref="TaskInstance"/>
+/// and a matching <see cref="PendingDispatch"/> row inside one DB transaction
+/// (roadmap P0-4 outbox pattern). The actual RabbitMQ publish runs out-of-band
+/// in <see cref="OutboxPublisherService"/>. There is no synchronous publish
+/// path here — if there were, a publish failure after the instance was
+/// persisted would orphan the row.
+/// </summary>
 public class TaskDispatchService
 {
     private readonly ClusterDbContext _dbContext;
-    private readonly IConnection _rabbitConnection;
     private readonly ILogger<TaskDispatchService> _logger;
 
-    public TaskDispatchService(ClusterDbContext dbContext, IConnection rabbitConnection, ILogger<TaskDispatchService> logger)
+    public TaskDispatchService(ClusterDbContext dbContext, ILogger<TaskDispatchService> logger)
     {
         _dbContext = dbContext;
-        _rabbitConnection = rabbitConnection;
         _logger = logger;
     }
 
@@ -36,22 +40,27 @@ public class TaskDispatchService
             Id = Guid.NewGuid(),
             TaskDefinitionId = taskDefinitionId,
             NodeId = nodeId,
-            Status = TaskInstance.TaskInstanceStatus.Pending,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
         };
 
-        _dbContext.TaskInstances.Add(instance);
-        await _dbContext.SaveChangesAsync();
-
         var message = BuildMessage(instance, definition);
+        var pending = new PendingDispatch
+        {
+            Id = Guid.NewGuid(),
+            InstanceId = instance.Id,
+            QueueName = TaskQueueName(nodeId),
+            Payload = JsonSerializer.Serialize(message),
+            CreatedAt = DateTime.UtcNow,
+        };
 
-        PublishToNode(nodeId, message);
-
-        instance.Status = TaskInstance.TaskInstanceStatus.Dispatched;
-        instance.DispatchedAt = DateTime.UtcNow;
+        await using var tx = await _dbContext.Database.BeginTransactionAsync();
+        _dbContext.TaskInstances.Add(instance);
+        _dbContext.PendingDispatches.Add(pending);
         await _dbContext.SaveChangesAsync();
+        await tx.CommitAsync();
 
-        _logger.LogInformation("Dispatched task instance {InstanceId} to node {NodeId}", instance.Id, nodeId);
+        _logger.LogInformation(
+            "Enqueued task instance {InstanceId} for dispatch to node {NodeId}", instance.Id, nodeId);
         return instance;
     }
 
@@ -80,21 +89,6 @@ public class TaskDispatchService
         TaskType = definition.TaskType,
         ConfigJson = definition.ConfigJson,
     };
-
-    private void PublishToNode(Guid nodeId, TaskMessage message)
-    {
-        using var channel = _rabbitConnection.CreateModel();
-        var queueName = TaskQueueName(nodeId);
-
-        channel.QueueDeclare(queue: queueName, durable: true, exclusive: false, autoDelete: false);
-
-        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
-        var props = channel.CreateBasicProperties();
-        props.Persistent = true;
-        props.ContentType = "application/json";
-
-        channel.BasicPublish(exchange: "", routingKey: queueName, basicProperties: props, body: body);
-    }
 
     public static string TaskQueueName(Guid nodeId) => $"tasks.{nodeId}";
 }

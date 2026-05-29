@@ -52,8 +52,8 @@ var builder = Host.CreateDefaultBuilder(args)
         // Add services
         services.AddSingleton<BackgroundMaestro>();
         services.AddSingleton<AppDbConnection>();
-        services.AddScoped<RegistrationService>();
-        services.AddScoped<HeartBeatService>();
+        services.AddSingleton<RegistrationService>();
+        services.AddSingleton<HeartBeatService>();
         services.AddSingleton<TaskExecutorService>();
 
         // Built-in task handlers

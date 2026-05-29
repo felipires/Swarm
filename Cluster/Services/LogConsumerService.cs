@@ -1,37 +1,39 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using Swarm.Cluster.Data;
 using Swarm.Cluster.Models;
-using System.Text.RegularExpressions;
 
 namespace Swarm.Cluster.Services;
 
 /// <summary>
-/// Consumes Serilog logs from RabbitMQ, buffers them, and performs bulk inserts into the database.
-/// Maintains a buffer of the latest logs per node for quick access.
+/// Consumes Serilog logs from RabbitMQ, buffers them per-node, and bulk-inserts
+/// into Postgres on a periodic flush or when the buffer fills. Uses a singleton
+/// <see cref="NpgsqlDataSource"/> for its DB writes — never EF Core — so it can
+/// safely live for the application lifetime.
 /// </summary>
 public partial class LogConsumerService : BackgroundService
 {
     private readonly ILogger<LogConsumerService> _logger;
     private readonly IConnection _rabbitConnection;
-    private readonly ClusterDbContext _dbContext;
+    private readonly NpgsqlDataSource _db;
     private IModel? _channel;
     private CancellationToken _stoppingToken;
 
-    private readonly object _bufferLock = new object();
+    private readonly object _bufferLock = new();
     private readonly Dictionary<Guid, List<Log>> _logBuffer = new();
     private readonly Dictionary<Guid, List<Log>> _latestLogsBuffer = new();
+
+    // Per-node flush serialization (P2-2). One semaphore per node — a flush
+    // in progress for node X never blocks node Y.
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _flushLocks = new();
+
+    // Consecutive flush-failure counter per node, used for exponential backoff
+    // on the buffer-cap recovery path (P2-3).
+    private readonly ConcurrentDictionary<Guid, int> _flushFailures = new();
 
     // SSE subscribers: nodeId → list of channels waiting for new logs
     private readonly Dictionary<Guid, List<System.Threading.Channels.Channel<Log>>> _subscribers = new();
@@ -40,10 +42,13 @@ public partial class LogConsumerService : BackgroundService
     private const int BufferFlushIntervalMs = 5000;
     private const int MaxBufferSizePerNode = 1000;
     private const int LatestLogsPerNodeToKeep = 100;
+    // Hard cap on per-node buffer once flushes are persistently failing.
+    // Older entries get dropped (FIFO) rather than growing memory unbounded (P2-3).
+    private const int MaxBufferTotalCap = 5000;
 
-    public LogConsumerService(ClusterDbContext dbContext, ILogger<LogConsumerService> logger, IConnection rabbitConnection)
+    public LogConsumerService(NpgsqlDataSource db, ILogger<LogConsumerService> logger, IConnection rabbitConnection)
     {
-        _dbContext = dbContext;
+        _db = db;
         _logger = logger;
         _rabbitConnection = rabbitConnection;
     }
@@ -94,10 +99,10 @@ public partial class LogConsumerService : BackgroundService
         {
             var body = ea.Body.ToArray();
             var message = System.Text.Encoding.UTF8.GetString(body);
-            
+
             var logEntry = ParseLogMessage(message, ea.BasicProperties);
             _logger.LogDebug("Received log from {nodeId}", logEntry?.NodeId);
-            
+
             if (logEntry != null)
             {
                 lock (_bufferLock)
@@ -277,22 +282,23 @@ public partial class LogConsumerService : BackgroundService
     {
         try
         {
-           while (!cancellationToken.IsCancellationRequested) 
+           while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
                     await Task.Delay(BufferFlushIntervalMs, cancellationToken);
 
+                    List<Guid> nodesWithLogs;
                     lock (_bufferLock)
                     {
-                        foreach (var nodeId in _logBuffer.Keys.ToList())
-                        {
-                            if (_logBuffer[nodeId].Count > 0)
-                            {
-                                _ = FlushLogsForNodeAsync(nodeId, cancellationToken);
-                            }
-                        }
+                        nodesWithLogs = _logBuffer
+                            .Where(kv => kv.Value.Count > 0)
+                            .Select(kv => kv.Key)
+                            .ToList();
                     }
+
+                    foreach (var nodeId in nodesWithLogs)
+                        _ = FlushLogsForNodeAsync(nodeId, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -308,55 +314,99 @@ public partial class LogConsumerService : BackgroundService
 
     private async Task FlushLogsForNodeAsync(Guid nodeId, CancellationToken cancellationToken)
     {
-        List<Log> logsToFlush;
-        lock (_bufferLock)
-        {
-            if (!_logBuffer.TryGetValue(nodeId, out List<Log>? value) || value.Count == 0)
-                return;
-
-            logsToFlush = [.. value];
-            value.Clear();
-        }
+        // P2-2: at most one flush in flight per node. WaitAsync(0) returns
+        // immediately — if a flush is already running, a fresh trigger is a no-op
+        // and the next periodic tick (or buffer-full event) will retry.
+        var sem = _flushLocks.GetOrAdd(nodeId, _ => new SemaphoreSlim(1, 1));
+        if (!await sem.WaitAsync(0, cancellationToken)) return;
 
         try
         {
-            var rows = string.Join(",", logsToFlush.Select(_ => "(gen_random_uuid(),@p{0},@p{1},@p{2},@p{3},@p{4},@p{5},@p{6},@p{7})"));
-            var parameters = new List<Npgsql.NpgsqlParameter>();
-            var valueClauses = new System.Text.StringBuilder();
-
-            for (int i = 0; i < logsToFlush.Count; i++)
-            {
-                var log = logsToFlush[i];
-                int b = i * 7;
-                if (i > 0) valueClauses.Append(',');
-                valueClauses.Append($"(@n{b},@l{b},@mt{b},@m{b},@ex{b},@pr{b},@ts{b},@ca{b})");
-                parameters.Add(new Npgsql.NpgsqlParameter($"n{b}", log.NodeId));
-                parameters.Add(new Npgsql.NpgsqlParameter($"l{b}", log.Level));
-                parameters.Add(new Npgsql.NpgsqlParameter($"mt{b}", log.MessageTemplate));
-                parameters.Add(new Npgsql.NpgsqlParameter($"m{b}", (object?)log.Message ?? DBNull.Value));
-                parameters.Add(new Npgsql.NpgsqlParameter($"ex{b}", (object?)log.Exception ?? DBNull.Value));
-                parameters.Add(new Npgsql.NpgsqlParameter($"pr{b}", (object?)log.Properties ?? DBNull.Value));
-                parameters.Add(new Npgsql.NpgsqlParameter($"ts{b}", log.Timestamp));
-                parameters.Add(new Npgsql.NpgsqlParameter($"ca{b}", log.CreatedAt));
-            }
-
-            var sql = $"INSERT INTO \"Logs\" (\"Id\",\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Timestamp\",\"CreatedAt\") SELECT gen_random_uuid(), * FROM (VALUES {valueClauses}) AS v(\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Timestamp\",\"CreatedAt\")";
-            await _dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken);
-
-            _logger.LogInformation("Flushed {LogCount} logs for node {NodeId} to database", logsToFlush.Count, nodeId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error flushing logs for node {NodeId}", nodeId);
-
-            // Put logs back in the buffer so they are not lost
+            List<Log> logsToFlush;
             lock (_bufferLock)
             {
-                if (!_logBuffer.ContainsKey(nodeId))
-                    _logBuffer[nodeId] = new List<Log>();
-                _logBuffer[nodeId].InsertRange(0, logsToFlush);
+                if (!_logBuffer.TryGetValue(nodeId, out var value) || value.Count == 0)
+                    return;
+
+                logsToFlush = [.. value];
+                value.Clear();
+            }
+
+            try
+            {
+                await BulkInsertLogsAsync(logsToFlush, cancellationToken);
+                _flushFailures.TryRemove(nodeId, out _);
+                _logger.LogInformation("Flushed {LogCount} logs for node {NodeId} to database", logsToFlush.Count, nodeId);
+            }
+            catch (Exception ex)
+            {
+                var failures = _flushFailures.AddOrUpdate(nodeId, 1, (_, c) => c + 1);
+                _logger.LogError(ex,
+                    "Error flushing logs for node {NodeId} (consecutive failures: {Failures})",
+                    nodeId, failures);
+
+                // P2-3: re-insert head-first, then truncate the oldest entries so
+                // the buffer cannot grow without bound while flushes keep failing.
+                lock (_bufferLock)
+                {
+                    if (!_logBuffer.TryGetValue(nodeId, out var current))
+                    {
+                        current = new List<Log>();
+                        _logBuffer[nodeId] = current;
+                    }
+
+                    var combined = new List<Log>(logsToFlush.Count + current.Count);
+                    combined.AddRange(logsToFlush);
+                    combined.AddRange(current);
+
+                    if (combined.Count > MaxBufferTotalCap)
+                    {
+                        var dropped = combined.Count - MaxBufferTotalCap;
+                        combined.RemoveRange(0, dropped);
+                        _logger.LogWarning(
+                            "Log buffer for node {NodeId} hit cap; dropped {Dropped} oldest entries",
+                            nodeId, dropped);
+                    }
+
+                    _logBuffer[nodeId] = combined;
+                }
             }
         }
+        finally
+        {
+            sem.Release();
+        }
+    }
+
+    private async Task BulkInsertLogsAsync(IReadOnlyList<Log> logs, CancellationToken cancellationToken)
+    {
+        await using var conn = await _db.OpenConnectionAsync(cancellationToken);
+        await using var cmd = conn.CreateCommand();
+
+        var valueClauses = new System.Text.StringBuilder();
+        for (int i = 0; i < logs.Count; i++)
+        {
+            var log = logs[i];
+            int b = i * 7;
+            if (i > 0) valueClauses.Append(',');
+            valueClauses.Append($"(@n{b},@l{b},@mt{b},@m{b},@ex{b},@pr{b},@ts{b},@ca{b})");
+
+            cmd.Parameters.Add(new NpgsqlParameter($"n{b}", log.NodeId));
+            cmd.Parameters.Add(new NpgsqlParameter($"l{b}", log.Level));
+            cmd.Parameters.Add(new NpgsqlParameter($"mt{b}", log.MessageTemplate));
+            cmd.Parameters.Add(new NpgsqlParameter($"m{b}", (object?)log.Message ?? DBNull.Value));
+            cmd.Parameters.Add(new NpgsqlParameter($"ex{b}", (object?)log.Exception ?? DBNull.Value));
+            cmd.Parameters.Add(new NpgsqlParameter($"pr{b}", (object?)log.Properties ?? DBNull.Value));
+            cmd.Parameters.Add(new NpgsqlParameter($"ts{b}", log.Timestamp));
+            cmd.Parameters.Add(new NpgsqlParameter($"ca{b}", log.CreatedAt));
+        }
+
+        cmd.CommandText =
+            "INSERT INTO \"Logs\" (\"Id\",\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Timestamp\",\"CreatedAt\") " +
+            "SELECT gen_random_uuid(), * FROM (VALUES " + valueClauses + ") " +
+            "AS v(\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Timestamp\",\"CreatedAt\")";
+
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public int GetBufferSizeForNode(Guid nodeId)
@@ -402,27 +452,24 @@ public partial class LogConsumerService : BackgroundService
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Stopping log consumer and flushing remaining logs");
-        
-        // Flush remaining logs
+
+        List<Guid> nodeIds;
         lock (_bufferLock)
         {
-            var nodeIds = _logBuffer.Keys.ToList();
-            foreach (var nodeId in nodeIds)
-            {
-                if (_logBuffer[nodeId].Count > 0)
-                {
-                    _ = FlushLogsForNodeAsync(nodeId, cancellationToken);
-                }
-            }
+            nodeIds = _logBuffer
+                .Where(kv => kv.Value.Count > 0)
+                .Select(kv => kv.Key)
+                .ToList();
         }
 
-        await Task.Delay(1000, cancellationToken);
+        var pending = nodeIds.Select(id => FlushLogsForNodeAsync(id, cancellationToken));
+        await Task.WhenAll(pending);
 
         _channel?.Dispose();
 
         await base.StopAsync(cancellationToken);
     }
 
-    [GeneratedRegexAttribute(@"\{(\w+)(?::[^}]*)?\}", RegexOptions.Compiled)]
+    [GeneratedRegex(@"\{(\w+)(?::[^}]*)?\}", RegexOptions.Compiled)]
     private static partial System.Text.RegularExpressions.Regex MyRegex();
 }

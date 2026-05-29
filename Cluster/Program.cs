@@ -1,22 +1,29 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
+using Npgsql;
 using RabbitMQ.Client;
 using Serilog;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.GrpcServices;
 using Swarm.Cluster.Logging;
-using Swarm.Cluster.Middleware;
 using Swarm.Cluster.Services;
-  
+
 var builder = WebApplication.CreateBuilder(args);
 
 Log.Logger = SerilogConfiguration.CreateLogger(builder.Configuration);
 
 builder.Host.UseSerilog(Log.Logger);
 
-// Add services
-builder.Services.AddDbContext<ClusterDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+// One Npgsql data source shared by EF Core (request-scoped DbContext) and any
+// singleton service that needs a raw connection (e.g. LogConsumerService).
+// Per Npgsql guidance, a single NpgsqlDataSource per app is correct and
+// singleton-safe — it manages its own pool internally.
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is not configured");
+builder.Services.AddSingleton(NpgsqlDataSource.Create(connectionString));
+
+builder.Services.AddDbContext<ClusterDbContext>((sp, options) =>
+    options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>()));
 
 // builder.Services.AddStackExchangeRedisCache(options =>
 // {
@@ -45,6 +52,7 @@ builder.Services.AddSingleton<LogConsumerService>();
 builder.Services.AddHostedService<HeartbeatBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LogConsumerService>());
 builder.Services.AddHostedService<TaskResultConsumerService>();
+builder.Services.AddHostedService<OutboxPublisherService>();
 
 builder.Services.AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
@@ -116,7 +124,6 @@ app.UseCors("AllowFrontend");
 
 app.UseAuthentication();
 app.UseAuthorization();
-// app.UseMiddleware<ApiKeyAuthMiddleware>();
 
 app.MapControllers();
 

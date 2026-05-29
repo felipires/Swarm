@@ -74,7 +74,9 @@ public class TaskExecutorService : IAsyncDisposable
 
         var queueName = $"tasks.{nodeId}";
         await _channel.QueueDeclareAsync(queue: queueName, durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
-        await _channel.QueueDeclareAsync(queue: ResultQueueName, durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
+        // task-results is owned by the Cluster (it carries DLX args per P0-5).
+        // We only publish to it, so we don't declare it here — a redeclare
+        // without matching args would fail with PRECONDITION_FAILED.
         await _channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false, cancellationToken: stoppingToken);
 
         var consumer = new AsyncEventingBasicConsumer(_channel);

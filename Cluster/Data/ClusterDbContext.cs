@@ -9,6 +9,7 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
     public DbSet<Log> Logs { get; set; } = null!;
     public DbSet<TaskDefinition> TaskDefinitions { get; set; } = null!;
     public DbSet<TaskInstance> TaskInstances { get; set; } = null!;
+    public DbSet<PendingDispatch> PendingDispatches { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -59,6 +60,22 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.HasOne(e => e.TaskDefinition)
                   .WithMany(t => t.Instances)
                   .HasForeignKey(e => e.TaskDefinitionId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PendingDispatch>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.QueueName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Payload).IsRequired().HasColumnType("jsonb");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.Property(e => e.Attempts).HasDefaultValue(0).IsRequired();
+            entity.HasIndex(e => e.PublishedAt)
+                  .HasFilter("\"PublishedAt\" IS NULL");
+            entity.HasOne<TaskInstance>()
+                  .WithMany()
+                  .HasForeignKey(e => e.InstanceId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
     }
