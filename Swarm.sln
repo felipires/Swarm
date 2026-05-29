@@ -1,0 +1,64 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{8E7E1759-CB54-4B5D-8E4F-5CEB3CB71D06}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swarm.Cluster", "src\Swarm.Cluster\Swarm.Cluster.csproj", "{8AA511CA-4A33-4C7B-9745-49B5A9007B40}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swarm.Node", "src\Swarm.Node\Swarm.Node.csproj", "{45BAB61F-776C-41EA-94DA-BAD18228B98F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swarm.Node.Sdk", "src\Swarm.Node.Sdk\Swarm.Node.Sdk.csproj", "{9EAEDF0C-9F6D-402F-8FDB-79778601E6AD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{7CF4391B-3760-40B6-B9A4-D56C66A0A7D6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swarm.Node.Sdk.Tests", "tests\Swarm.Node.Sdk.Tests\Swarm.Node.Sdk.Tests.csproj", "{B41C337E-BA47-4A44-AE0D-ECC00215E1CA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swarm.Node.Tests", "tests\Swarm.Node.Tests\Swarm.Node.Tests.csproj", "{4586BEF0-09B2-470B-B22B-CB6752479F0D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swarm.Cluster.Tests", "tests\Swarm.Cluster.Tests\Swarm.Cluster.Tests.csproj", "{80A9EF89-48B6-409D-AF32-B5C88B3B41D3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8AA511CA-4A33-4C7B-9745-49B5A9007B40}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8AA511CA-4A33-4C7B-9745-49B5A9007B40}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8AA511CA-4A33-4C7B-9745-49B5A9007B40}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8AA511CA-4A33-4C7B-9745-49B5A9007B40}.Release|Any CPU.Build.0 = Release|Any CPU
+		{45BAB61F-776C-41EA-94DA-BAD18228B98F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{45BAB61F-776C-41EA-94DA-BAD18228B98F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{45BAB61F-776C-41EA-94DA-BAD18228B98F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{45BAB61F-776C-41EA-94DA-BAD18228B98F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9EAEDF0C-9F6D-402F-8FDB-79778601E6AD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9EAEDF0C-9F6D-402F-8FDB-79778601E6AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9EAEDF0C-9F6D-402F-8FDB-79778601E6AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9EAEDF0C-9F6D-402F-8FDB-79778601E6AD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B41C337E-BA47-4A44-AE0D-ECC00215E1CA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B41C337E-BA47-4A44-AE0D-ECC00215E1CA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B41C337E-BA47-4A44-AE0D-ECC00215E1CA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B41C337E-BA47-4A44-AE0D-ECC00215E1CA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4586BEF0-09B2-470B-B22B-CB6752479F0D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4586BEF0-09B2-470B-B22B-CB6752479F0D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4586BEF0-09B2-470B-B22B-CB6752479F0D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4586BEF0-09B2-470B-B22B-CB6752479F0D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{80A9EF89-48B6-409D-AF32-B5C88B3B41D3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80A9EF89-48B6-409D-AF32-B5C88B3B41D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80A9EF89-48B6-409D-AF32-B5C88B3B41D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{80A9EF89-48B6-409D-AF32-B5C88B3B41D3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{8AA511CA-4A33-4C7B-9745-49B5A9007B40} = {8E7E1759-CB54-4B5D-8E4F-5CEB3CB71D06}
+		{45BAB61F-776C-41EA-94DA-BAD18228B98F} = {8E7E1759-CB54-4B5D-8E4F-5CEB3CB71D06}
+		{9EAEDF0C-9F6D-402F-8FDB-79778601E6AD} = {8E7E1759-CB54-4B5D-8E4F-5CEB3CB71D06}
+		{B41C337E-BA47-4A44-AE0D-ECC00215E1CA} = {7CF4391B-3760-40B6-B9A4-D56C66A0A7D6}
+		{4586BEF0-09B2-470B-B22B-CB6752479F0D} = {7CF4391B-3760-40B6-B9A4-D56C66A0A7D6}
+		{80A9EF89-48B6-409D-AF32-B5C88B3B41D3} = {7CF4391B-3760-40B6-B9A4-D56C66A0A7D6}
+	EndGlobalSection
+EndGlobal

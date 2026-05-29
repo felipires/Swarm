@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Swarm.Cluster.Tests" />
+    <InternalsVisibleTo Include="..\tests\Swarm.Cluster.Tests" />
   </ItemGroup>
 
   <ItemGroup>
