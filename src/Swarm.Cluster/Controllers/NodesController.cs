@@ -21,16 +21,20 @@ public class NodesController : ControllerBase
     }
 
     /// <summary>
-    /// Get all nodes
+    /// Get nodes with optional status filter (paginated, P3-1).
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<List<NodeResponse>>> GetNodes([FromQuery] Node.NodeStatus? status = null)
+    public async Task<ActionResult<PagedResult<NodeResponse>>> GetNodes(
+        [FromQuery] Node.NodeStatus? status = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
     {
         _logger.LogInformation("Fetching nodes with status filter: {Status}", status?.ToString() ?? "all");
-        
-        var nodes = await _nodeService.GetNodesAsync(status);
-        
-        var response = nodes.Select(n => new NodeResponse
+
+        var paging = new PageRequest { Page = page, PageSize = pageSize };
+        var (nodes, total) = await _nodeService.GetNodesAsync(status, paging.Skip, paging.NormalizedPageSize);
+
+        var items = nodes.Select(n => new NodeResponse
         {
             Id = n.Id,
             Name = n.Name,
@@ -39,7 +43,7 @@ public class NodesController : ControllerBase
             CreatedAt = n.CreatedAt
         }).ToList();
 
-        return Ok(response);
+        return Ok(new PagedResult<NodeResponse>(items, total, paging.NormalizedPage, paging.NormalizedPageSize));
     }
 
     /// <summary>

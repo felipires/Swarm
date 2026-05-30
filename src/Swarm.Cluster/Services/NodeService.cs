@@ -131,18 +131,24 @@ public class NodeService
     }
 
     /// <summary>
-    /// Get all nodes with optional filtering
+    /// Get nodes with optional status filter (paginated, P3-1). Returns the
+    /// page plus the total matching-row count so the caller can compute
+    /// total pages.
     /// </summary>
-    public async Task<List<Node>> GetNodesAsync(Node.NodeStatus? status = null)
+    public async Task<(List<Node> Items, int Total)> GetNodesAsync(Node.NodeStatus? status, int skip, int take)
     {
-        var query = _dbContext.Nodes.AsQueryable();
-
+        IQueryable<Node> query = _dbContext.Nodes;
         if (status.HasValue)
-        {
             query = query.Where(n => n.Status == status.Value);
-        }
 
-        return await query.OrderByDescending(n => n.LastHeartbeatAt).ToListAsync();
+        var total = await query.CountAsync();
+        var items = await query
+            .OrderByDescending(n => n.LastHeartbeatAt)
+            .Skip(skip)
+            .Take(take)
+            .ToListAsync();
+
+        return (items, total);
     }
 
     /// <summary>

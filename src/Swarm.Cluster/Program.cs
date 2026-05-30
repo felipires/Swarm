@@ -56,6 +56,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<LogConsumerService
 builder.Services.AddHostedService<TaskResultConsumerService>();
 builder.Services.AddHostedService<OutboxPublisherService>();
 builder.Services.AddHostedService<TaskClaimsConsumerService>();
+builder.Services.AddHostedService<LogRetentionService>();
 
 builder.Services.AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));

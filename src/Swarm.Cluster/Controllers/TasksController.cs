@@ -23,14 +23,17 @@ public class TasksController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<TaskDefinitionResponse>>> GetAll()
+    public async Task<ActionResult<PagedResult<TaskDefinitionResponse>>> GetAll([FromQuery] PageRequest page)
     {
-        var tasks = await _db.TaskDefinitions
-            .OrderByDescending(t => t.CreatedAt)
+        var baseQuery = _db.TaskDefinitions.OrderByDescending(t => t.CreatedAt);
+        var total = await baseQuery.CountAsync();
+        var items = await baseQuery
+            .Skip(page.Skip)
+            .Take(page.NormalizedPageSize)
             .Select(t => ToResponse(t))
             .ToListAsync();
 
-        return Ok(tasks);
+        return Ok(new PagedResult<TaskDefinitionResponse>(items, total, page.NormalizedPage, page.NormalizedPageSize));
     }
 
     [HttpGet("{id}")]
@@ -116,16 +119,22 @@ public class TasksController : ControllerBase
         return Ok(instances.Select(TaskInstanceResponse.From));
     }
 
-    /// <summary>Get all instances for a task definition.</summary>
+    /// <summary>Get instances for a task definition (paginated).</summary>
     [HttpGet("{id}/instances")]
-    public async Task<ActionResult<List<TaskInstanceResponse>>> GetInstances(Guid id)
+    public async Task<ActionResult<PagedResult<TaskInstanceResponse>>> GetInstances(Guid id, [FromQuery] PageRequest page)
     {
-        var instances = await _db.TaskInstances
+        var baseQuery = _db.TaskInstances
             .Where(i => i.TaskDefinitionId == id)
-            .OrderByDescending(i => i.CreatedAt)
+            .OrderByDescending(i => i.CreatedAt);
+        var total = await baseQuery.CountAsync();
+        var instances = await baseQuery
+            .Skip(page.Skip)
+            .Take(page.NormalizedPageSize)
             .ToListAsync();
 
-        return Ok(instances.Select(TaskInstanceResponse.From));
+        return Ok(new PagedResult<TaskInstanceResponse>(
+            instances.Select(TaskInstanceResponse.From).ToList(),
+            total, page.NormalizedPage, page.NormalizedPageSize));
     }
 
     /// <summary>Get a single task instance by ID.</summary>
