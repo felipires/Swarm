@@ -1,14 +1,19 @@
+using System.Data.Common;
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
+using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Npgsql;
 using Swarm.Sdk.Abstractions;
 
 namespace Swarm.Node.Handlers;
 
 /// <summary>
-/// Built-in <c>sql@1</c> handler — executes a parameterized Postgres query
-/// and returns rows as a JSON array. Phase 1 supports Postgres only; the
-/// roadmap leaves multi-flavor SQL for a follow-up.
+/// Built-in <c>sql@1</c> handler — executes a parameterized query against
+/// Postgres, SQL Server, or MySQL/MariaDB. Provider is selected via the
+/// <c>provider</c> field on the config (defaults to <c>postgres</c>). All
+/// three providers accept <c>@param</c>-style parameter markers in the
+/// query, so the dispatch layer normalizes nothing — write the query in
+/// the dialect the provider expects.
 /// </summary>
 public sealed class SqlHandlerV1 : ITaskHandler
 {
@@ -21,6 +26,7 @@ public sealed class SqlHandlerV1 : ITaskHandler
               "type": "object",
               "required": ["connectionString", "query"],
               "properties": {
+                "provider": { "type": "string", "enum": ["postgres", "postgresql", "mssql", "sqlserver", "mysql", "mariadb"] },
                 "connectionString": { "type": "string" },
                 "query": { "type": "string" },
                 "parameters": { "type": "object" },
@@ -56,40 +62,71 @@ public sealed class SqlHandlerV1 : ITaskHandler
         if (config is null || string.IsNullOrEmpty(config.ConnectionString) || string.IsNullOrEmpty(config.Query))
             return new TaskResult(false, ErrorMessage: "CONFIG_RESOLUTION_INVALID: connectionString and query are required");
 
+        DbConnection conn;
+        try
+        {
+            conn = OpenConnection(config.Provider, config.ConnectionString);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_INVALID: {ex.Message}");
+        }
+
         var rowLimit = config.RowLimit > 0 ? config.RowLimit : 10000;
 
         try
         {
-            await using var conn = new NpgsqlConnection(config.ConnectionString);
-            await conn.OpenAsync(context.CancellationToken);
-
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = config.Query;
-
-            if (config.Parameters is { Count: > 0 })
+            await using (conn)
             {
-                foreach (var (k, v) in config.Parameters)
-                    cmd.Parameters.Add(new NpgsqlParameter(k, (object?)v ?? DBNull.Value));
-            }
+                await conn.OpenAsync(context.CancellationToken);
 
-            var rows = new List<Dictionary<string, object?>>();
-            await using var reader = await cmd.ExecuteReaderAsync(context.CancellationToken);
-            while (await reader.ReadAsync(context.CancellationToken) && rows.Count < rowLimit)
-            {
-                var row = new Dictionary<string, object?>(reader.FieldCount);
-                for (int i = 0; i < reader.FieldCount; i++)
-                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                rows.Add(row);
-            }
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = config.Query;
 
-            var resultJson = JsonSerializer.Serialize(new { rowCount = rows.Count, rows });
-            return new TaskResult(true, ResultJson: resultJson);
+                if (config.Parameters is { Count: > 0 })
+                {
+                    foreach (var (k, v) in config.Parameters)
+                    {
+                        var param = cmd.CreateParameter();
+                        param.ParameterName = k;
+                        param.Value = (object?)v ?? DBNull.Value;
+                        cmd.Parameters.Add(param);
+                    }
+                }
+
+                var rows = new List<Dictionary<string, object?>>();
+                await using var reader = await cmd.ExecuteReaderAsync(context.CancellationToken);
+                while (await reader.ReadAsync(context.CancellationToken) && rows.Count < rowLimit)
+                {
+                    var row = new Dictionary<string, object?>(reader.FieldCount);
+                    for (int i = 0; i < reader.FieldCount; i++)
+                        row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                    rows.Add(row);
+                }
+
+                var resultJson = JsonSerializer.Serialize(new { rowCount = rows.Count, rows });
+                return new TaskResult(true, ResultJson: resultJson);
+            }
         }
-        catch (NpgsqlException ex)
+        catch (DbException ex)
         {
             return new TaskResult(false, ErrorMessage: $"SQL_EXECUTION_FAILED: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// Construct a typed <see cref="DbConnection"/> for the requested provider.
+    /// Three are supported in Phase 1; add more by extending the switch and
+    /// the schema <c>enum</c>.
+    /// </summary>
+    internal static DbConnection OpenConnection(string? provider, string connectionString)
+        => (provider?.ToLowerInvariant() ?? "postgres") switch
+        {
+            "" or "postgres" or "postgresql" => new NpgsqlConnection(connectionString),
+            "mssql" or "sqlserver" => new SqlConnection(connectionString),
+            "mysql" or "mariadb" => new MySqlConnection(connectionString),
+            var p => throw new InvalidOperationException($"Unsupported SQL provider '{p}'"),
+        };
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -98,6 +135,8 @@ public sealed class SqlHandlerV1 : ITaskHandler
 
     private sealed class SqlHandlerConfig
     {
+        /// <summary>postgres | mssql | mysql; defaults to postgres.</summary>
+        public string? Provider { get; set; }
         public string? ConnectionString { get; set; }
         public string? Query { get; set; }
         public Dictionary<string, string>? Parameters { get; set; }

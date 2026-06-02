@@ -10,18 +10,24 @@ using Swarm.Sdk.Abstractions;
 using Swarm.Sdk.ValueResolution;
 using Swarm.Sdk.Wire;
 using Swarm.Node.ValueResolution;
+using EnvStoreResolver = Swarm.Node.ValueResolution.EnvStoreResolver;
 
 namespace Swarm.Node.Services;
 
 public class TaskExecutorService : IAsyncDisposable
 {
     private readonly AppDbConnection _dbConnection;
+    private readonly EnvSecretsStore _envSecrets;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TaskExecutorService> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly HandlerRegistry _registry;
     private IConnection? _rabbitConnection;
     private IChannel? _channel;
+    private AsyncEventingBasicConsumer? _consumer;
+    // P0-3a: tagged-queue subscriptions the Node currently holds, queueName → RabbitMQ consumer tag.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _taggedConsumers = new();
+    private readonly SemaphoreSlim _subscriptionGate = new(1, 1);
 
     public const string ResultQueueName = "task-results";
     public const string ClaimQueueName = "task-claims";
@@ -29,12 +35,14 @@ public class TaskExecutorService : IAsyncDisposable
 
     public TaskExecutorService(
         AppDbConnection dbConnection,
+        EnvSecretsStore envSecrets,
         IConfiguration configuration,
         ILogger<TaskExecutorService> logger,
         ILoggerFactory loggerFactory,
         IEnumerable<ITaskHandler> handlers)
     {
         _dbConnection = dbConnection;
+        _envSecrets = envSecrets;
         _configuration = configuration;
         _logger = logger;
         _loggerFactory = loggerFactory;
@@ -82,13 +90,13 @@ public class TaskExecutorService : IAsyncDisposable
         // here — a redeclare with different args would fail PRECONDITION.
         await _channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false, cancellationToken: stoppingToken);
 
-        var consumer = new AsyncEventingBasicConsumer(_channel);
-        consumer.ReceivedAsync += (_, ea) => OnTaskReceived(ea, stoppingToken);
+        _consumer = new AsyncEventingBasicConsumer(_channel);
+        _consumer.ReceivedAsync += (_, ea) => OnTaskReceived(ea, stoppingToken);
 
-        // Always consume the per-node queue (SpecificNode / AllOnlineNodes / TaggedNodes Phase-1).
+        // Always consume the per-node queue (SpecificNode / AllOnlineNodes).
         var perNodeQueue = $"tasks.{nodeId}";
         await _channel.QueueDeclareAsync(queue: perNodeQueue, durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
-        await _channel.BasicConsumeAsync(queue: perNodeQueue, autoAck: false, consumer: consumer, cancellationToken: stoppingToken);
+        await _channel.BasicConsumeAsync(queue: perNodeQueue, autoAck: false, consumer: _consumer, cancellationToken: stoppingToken);
         _logger.LogInformation("Subscribed to per-node queue '{Queue}'", perNodeQueue);
 
         // P0-3a: also consume one shared queue per advertised TaskType so
@@ -97,8 +105,59 @@ public class TaskExecutorService : IAsyncDisposable
         {
             var shared = SharedQueueName(taskType);
             await _channel.QueueDeclareAsync(queue: shared, durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
-            await _channel.BasicConsumeAsync(queue: shared, autoAck: false, consumer: consumer, cancellationToken: stoppingToken);
+            await _channel.BasicConsumeAsync(queue: shared, autoAck: false, consumer: _consumer, cancellationToken: stoppingToken);
             _logger.LogInformation("Subscribed to shared queue '{Queue}'", shared);
+        }
+    }
+
+    /// <summary>
+    /// Reconcile the Node's tagged-queue subscriptions against the list the
+    /// Cluster pushed in the latest heartbeat (P0-3a). Subscribes to any new
+    /// queues, cancels any that dropped out.
+    /// </summary>
+    public async Task EnsureTaggedSubscriptionsAsync(IReadOnlyCollection<string> desired, CancellationToken cancellationToken)
+    {
+        if (_channel is null || _consumer is null) return;
+
+        await _subscriptionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var desiredSet = new HashSet<string>(desired, StringComparer.Ordinal);
+
+            foreach (var (existingQueue, consumerTag) in _taggedConsumers.ToArray())
+            {
+                if (desiredSet.Contains(existingQueue)) continue;
+                try
+                {
+                    await _channel.BasicCancelAsync(consumerTag, cancellationToken: cancellationToken);
+                    _taggedConsumers.TryRemove(existingQueue, out _);
+                    _logger.LogInformation("Cancelled tagged subscription {Queue}", existingQueue);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to cancel tagged subscription {Queue}", existingQueue);
+                }
+            }
+
+            foreach (var queue in desiredSet)
+            {
+                if (_taggedConsumers.ContainsKey(queue)) continue;
+                try
+                {
+                    await _channel.QueueDeclareAsync(queue: queue, durable: true, exclusive: false, autoDelete: false, cancellationToken: cancellationToken);
+                    var tag = await _channel.BasicConsumeAsync(queue: queue, autoAck: false, consumer: _consumer, cancellationToken: cancellationToken);
+                    _taggedConsumers[queue] = tag;
+                    _logger.LogInformation("Subscribed to tagged queue {Queue}", queue);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to subscribe to tagged queue {Queue}", queue);
+                }
+            }
+        }
+        finally
+        {
+            _subscriptionGate.Release();
         }
     }
 
@@ -198,7 +257,7 @@ public class TaskExecutorService : IAsyncDisposable
         // it cares about, then parses the resolved JSON.
         var pipeline = new ValueResolverPipeline(new IValueResolver[]
         {
-            new EnvStoreResolver(),
+            new EnvStoreResolver(_envSecrets),
             new ParamResolver(runtimeParams),
             new ConfigResolver(staticConfig),
         });

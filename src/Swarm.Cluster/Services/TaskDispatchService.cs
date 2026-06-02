@@ -110,11 +110,57 @@ public class TaskDispatchService
         if (tags is null || tags.Count == 0)
             throw new InvalidOperationException("TaggedNodes strategy requires a non-empty tag selector");
 
-        // P0-3a Phase-1 simplification: resolve eligible Nodes server-side and
-        // pick one at random. Full shared queue (tasks.tagged.<hash>) with
-        // dynamic Node subscription via heartbeat push is a follow-up.
+        // Determinism: same tag selector → same queue. The Cluster also
+        // remembers the route in TaggedRoute so it can tell Nodes which
+        // tagged queues to subscribe to (via heartbeat response).
+        var (hash, canonical) = TaggedRouteHash.Compute(tags);
+        var queueName = TaggedRouteHash.QueueNameForHash(hash);
+
+        // Eligibility precheck: at least one online Node must have a
+        // superset of the selector tags AND advertise the TaskType.
+        var eligible = await ResolveEligibleNodesAsync(tags, definition.TaskType);
+        if (eligible.Count == 0)
+            throw new InvalidOperationException(
+                $"No online Node satisfies tag selector {canonical} for TaskType '{definition.TaskType}'");
+
+        var existing = await _dbContext.TaggedRoutes.FindAsync(hash);
+        var now = DateTime.UtcNow;
+        if (existing is null)
+        {
+            _dbContext.TaggedRoutes.Add(new TaggedRoute
+            {
+                Hash = hash,
+                SelectorJson = canonical,
+                FirstSeenAt = now,
+                LastUsedAt = now,
+            });
+        }
+        else
+        {
+            existing.LastUsedAt = now;
+        }
+
+        var instance = NewInstance(definition.Id, nodeId: null, runtimeParamsJson);
+        await PersistDispatchAsync(instance, definition, queueName);
+        _logger.LogInformation(
+            "Enqueued instance {InstanceId} on tagged shared queue {Queue} (selector {Selector}, {Count} eligible Node(s))",
+            instance.Id, queueName, canonical, eligible.Count);
+        return instance;
+    }
+
+    private async Task<List<Node>> ResolveEligibleNodesAsync(IReadOnlyDictionary<string, string> selector, string taskType)
+    {
+        // Pull online Nodes that advertise the TaskType, then filter by tag
+        // superset in-memory (StaticTagsJson is text/jsonb; doing the JSON
+        // containment in SQL would require provider-specific syntax — Phase-1
+        // simplification, see P3-3 follow-up).
         var candidates = await _dbContext.Nodes
-            .Where(n => n.Status == Node.NodeStatus.Online && n.StaticTagsJson != null)
+            .Join(_dbContext.NodeCapabilities, n => n.Id, c => c.NodeId, (n, c) => new { Node = n, Capability = c })
+            .Where(x => x.Node.Status == Node.NodeStatus.Online
+                        && x.Capability.TaskType == taskType
+                        && x.Node.StaticTagsJson != null)
+            .Select(x => x.Node)
+            .Distinct()
             .ToListAsync();
 
         var eligible = new List<Node>();
@@ -122,42 +168,65 @@ public class TaskDispatchService
         {
             var nodeTags = ParseTags(node.StaticTagsJson);
             if (nodeTags is null) continue;
-            if (tags.All(req => nodeTags.TryGetValue(req.Key, out var v) && v == req.Value))
+            if (selector.All(req => nodeTags.TryGetValue(req.Key, out var v) && v == req.Value))
                 eligible.Add(node);
         }
-
-        if (eligible.Count == 0)
-            throw new InvalidOperationException(
-                $"No online Node satisfies tag selector {JsonSerializer.Serialize(tags)}");
-
-        var picked = eligible[_picker.Next(eligible.Count)];
-        _logger.LogInformation(
-            "TaggedNodes resolved to {Eligible} eligible Nodes; picking {NodeId}",
-            eligible.Count, picked.Id);
-        return await DispatchToSpecificAsync(definition, picked.Id, runtimeParamsJson);
+        return eligible;
     }
 
-    public async Task<List<TaskInstance>> DispatchToAllOnlineAsync(Guid taskDefinitionId)
+    /// <summary>
+    /// Broadcast: one <see cref="TaskInstance"/> per online Node, each on its
+    /// own per-node queue. P2-4 — all rows are batched into a single
+    /// <c>AddRange</c> + transaction so a 100-node fleet incurs one round
+    /// trip instead of one per Node.
+    /// </summary>
+    public async Task<List<TaskInstance>> DispatchToAllOnlineAsync(Guid taskDefinitionId, string? runtimeParamsJson = null)
     {
         var definition = await _dbContext.TaskDefinitions.FindAsync(taskDefinitionId)
             ?? throw new InvalidOperationException($"TaskDefinition {taskDefinitionId} not found");
 
-        var onlineNodes = await _dbContext.Nodes
+        var onlineNodeIds = await _dbContext.Nodes
             .Where(n => n.Status == Node.NodeStatus.Online)
             .Select(n => n.Id)
             .ToListAsync();
 
-        if (onlineNodes.Count == 0)
+        if (onlineNodeIds.Count == 0)
             throw new InvalidOperationException("No online nodes available");
 
-        var results = new List<TaskInstance>();
-        foreach (var nodeId in onlineNodes)
-            results.Add(await DispatchToSpecificAsync(definition, nodeId));
+        // P1-7 once for the broadcast — eligibility check still applies
+        // (must have ≥1 online Node advertising the TaskType somewhere).
+        if (_validator is not null)
+            await _validator.ValidateAsync(definition, runtimeParamsJson,
+                DispatchStrategy.AllOnlineNodes, targetNodeId: null, CancellationToken.None);
 
-        return results;
+        var instances = new List<TaskInstance>(onlineNodeIds.Count);
+        var pendings = new List<PendingDispatch>(onlineNodeIds.Count);
+        foreach (var nodeId in onlineNodeIds)
+        {
+            var instance = NewInstance(definition.Id, nodeId, runtimeParamsJson);
+            instances.Add(instance);
+            pendings.Add(new PendingDispatch
+            {
+                Id = Guid.NewGuid(),
+                InstanceId = instance.Id,
+                QueueName = TaskQueueName(nodeId),
+                Payload = JsonSerializer.Serialize(BuildMessage(instance, definition)),
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
+
+        await using var tx = await _dbContext.Database.BeginTransactionAsync();
+        _dbContext.TaskInstances.AddRange(instances);
+        _dbContext.PendingDispatches.AddRange(pendings);
+        await _dbContext.SaveChangesAsync();
+        await tx.CommitAsync();
+
+        _logger.LogInformation(
+            "Broadcast task {DefinitionId} to {Count} online node(s)", definition.Id, onlineNodeIds.Count);
+        return instances;
     }
 
-    private TaskInstance NewInstance(Guid taskDefinitionId, Guid? nodeId, string? runtimeParamsJson = null) => new()
+    private static TaskInstance NewInstance(Guid taskDefinitionId, Guid? nodeId, string? runtimeParamsJson = null) => new()
     {
         Id = Guid.NewGuid(),
         TaskDefinitionId = taskDefinitionId,

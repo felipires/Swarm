@@ -104,9 +104,49 @@ public class NodesController : ControllerBase
         var effective = await _nodeService.UpdateOverlayTagsAsync(id, body.Add, body.Remove);
         return Ok(effective);
     }
+
+    /// <summary>
+    /// Set a task-config env secret on the Node (P1-5a). Cluster queues the
+    /// op for delivery on the next heartbeat. The Node decrypts and stores
+    /// locally; the Cluster does not persist the value beyond the ack window.
+    /// </summary>
+    [HttpPost("{id}/env")]
+    public async Task<ActionResult> SetEnvSecret(Guid id, [FromBody] SetEnvSecretRequest body)
+    {
+        if (string.IsNullOrEmpty(body.Key))
+            return BadRequest(new ApiError("INVALID_KEY", "Key is required"));
+
+        var op = await _nodeService.EnqueueEnvOpAsync(id, NodeEnvOp.EnvOpKind.Set, body.Key, body.Value);
+        return Accepted(new { opId = op.Id, key = op.Key });
+    }
+
+    /// <summary>
+    /// Queue a delete for a single key on the Node (P1-5a). The Node removes
+    /// the key from its local encrypted store on the next heartbeat.
+    /// </summary>
+    [HttpDelete("{id}/env/{key}")]
+    public async Task<ActionResult> DeleteEnvSecret(Guid id, string key)
+    {
+        var op = await _nodeService.EnqueueEnvOpAsync(id, NodeEnvOp.EnvOpKind.Delete, key, value: null);
+        return Accepted(new { opId = op.Id, key = op.Key });
+    }
+
+    /// <summary>
+    /// List env keys currently pending delivery to the Node (P1-5a). Does
+    /// not include keys the Node has already applied — operators wanting
+    /// authoritative state must read the Node directly.
+    /// </summary>
+    [HttpGet("{id}/env")]
+    public async Task<ActionResult<List<string>>> ListEnvSecrets(Guid id)
+    {
+        var keys = await _nodeService.ListPendingEnvKeysAsync(id);
+        return Ok(keys);
+    }
 }
 
 public record UpdateOverlayTagsRequest(
     Dictionary<string, string>? Add = null,
     List<string>? Remove = null);
+
+public record SetEnvSecretRequest(string Key, string Value);
 

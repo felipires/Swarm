@@ -71,9 +71,35 @@ public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.Node
         if (!known)
             return new RecordHeartbeatResponse { Success = false, Message = "NodeNotFound" };
 
+        // P1-5a: ack ops the Node applied since the last heartbeat, then
+        // drain a batch of pending ops to deliver in this response.
+        if (request.AckedEnvOpIds is { Count: > 0 })
+        {
+            var ackedIds = request.AckedEnvOpIds
+                .Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty)
+                .Where(g => g != Guid.Empty)
+                .ToList();
+            await _nodeService.AckEnvOpsAsync(nodeId, ackedIds);
+        }
+
         var response = new RecordHeartbeatResponse { Success = true, Message = "Heartbeat recorded successfully" };
         foreach (var (k, v) in await _nodeService.GetOverlayTagsAsync(nodeId))
             response.OverlayTags.Add(k, v);
+
+        foreach (var op in await _nodeService.DrainEnvOpsForHeartbeatAsync(nodeId))
+        {
+            response.PendingEnvOps.Add(new EnvOp
+            {
+                Id = op.Id.ToString(),
+                Kind = op.Op == Models.NodeEnvOp.EnvOpKind.Set ? EnvOpKind.Set : EnvOpKind.DeleteKey,
+                Key = op.Key,
+                Value = op.Value ?? string.Empty,
+            });
+        }
+
+        foreach (var queue in await _nodeService.GetTaggedSubscriptionsAsync(nodeId))
+            response.TaggedSubscriptions.Add(queue);
+
         return response;
     }
 }

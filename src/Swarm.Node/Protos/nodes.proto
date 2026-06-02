@@ -48,6 +48,9 @@ message RecordHeartbeatRequest {
   string node_id = 1;
   string api_key = 2;
   bool is_online = 3;
+  // P1-5a: IDs of env ops the Node has applied since the last heartbeat.
+  // The Cluster deletes these so they're not redelivered.
+  repeated string acked_env_op_ids = 4;
 }
 
 message RecordHeartbeatResponse {
@@ -56,4 +59,27 @@ message RecordHeartbeatResponse {
   // Cluster-managed overlay tags (D6) pushed to the Node on every heartbeat.
   // Node merges with its static tags; static wins on key conflict.
   map<string, string> overlay_tags = 3;
+  // P1-5a: pending task-env mutations the Node should apply to its local
+  // encrypted env store. Each op carries an ID the Node echoes back in
+  // its next heartbeat's acked_env_op_ids to confirm.
+  repeated EnvOp pending_env_ops = 4;
+  // P0-3a / D6: shared "tasks.tagged.<hash>" queue names this Node should
+  // be subscribed to. Computed by the Cluster from known TaggedRoutes
+  // whose selector is a subset of the Node's effective tags. The Node
+  // diffs this set against its current subscriptions and subscribes /
+  // cancels accordingly on each heartbeat.
+  repeated string tagged_subscriptions = 5;
+}
+
+message EnvOp {
+  string id = 1;
+  EnvOpKind kind = 2;
+  string key = 3;
+  // Value present for Set; ignored for DeleteKey.
+  string value = 4;
+}
+
+enum EnvOpKind {
+  SET = 0;
+  DELETE_KEY = 1;
 }

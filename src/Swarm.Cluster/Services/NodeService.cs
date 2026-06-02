@@ -207,6 +207,127 @@ public class NodeService
     }
 
     /// <summary>
+    /// Queue an env op (Set or Delete) for the next heartbeat to deliver.
+    /// Multiple ops for the same key are kept in submission order — the Node
+    /// applies them as a sequence. P1-5a.
+    /// </summary>
+    public async Task<NodeEnvOp> EnqueueEnvOpAsync(Guid nodeId, NodeEnvOp.EnvOpKind op, string key, string? value)
+    {
+        if (!await _dbContext.Nodes.AnyAsync(n => n.Id == nodeId))
+            throw new InvalidOperationException($"Node {nodeId} not found");
+
+        var row = new NodeEnvOp
+        {
+            Id = Guid.NewGuid(),
+            NodeId = nodeId,
+            Op = op,
+            Key = key,
+            Value = op == NodeEnvOp.EnvOpKind.Set ? value : null,
+            CreatedAt = DateTime.UtcNow,
+        };
+        _dbContext.NodeEnvOps.Add(row);
+        await _dbContext.SaveChangesAsync();
+        return row;
+    }
+
+    /// <summary>
+    /// Drain a batch of pending env ops for delivery in a heartbeat response.
+    /// Marks each as sent so they're not re-fired immediately, but keeps them
+    /// in the table until the Node acks via <see cref="AckEnvOpsAsync"/>.
+    /// Re-sent if not acked within the grace window.
+    /// </summary>
+    public async Task<List<NodeEnvOp>> DrainEnvOpsForHeartbeatAsync(Guid nodeId)
+    {
+        var resendCutoff = DateTime.UtcNow.AddSeconds(-30);
+        var pending = await _dbContext.NodeEnvOps
+            .Where(o => o.NodeId == nodeId
+                        && (o.LastSentAt == null || o.LastSentAt < resendCutoff))
+            .OrderBy(o => o.CreatedAt)
+            .Take(50)
+            .ToListAsync();
+
+        if (pending.Count == 0) return pending;
+
+        var now = DateTime.UtcNow;
+        foreach (var op in pending) op.LastSentAt = now;
+        await _dbContext.SaveChangesAsync();
+        return pending;
+    }
+
+    /// <summary>
+    /// Delete acked env ops (the Node confirmed they were applied).
+    /// </summary>
+    public async Task AckEnvOpsAsync(Guid nodeId, IReadOnlyList<Guid> opIds)
+    {
+        if (opIds.Count == 0) return;
+        var toDelete = await _dbContext.NodeEnvOps
+            .Where(o => o.NodeId == nodeId && opIds.Contains(o.Id))
+            .ToListAsync();
+        if (toDelete.Count == 0) return;
+        _dbContext.NodeEnvOps.RemoveRange(toDelete);
+        await _dbContext.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// List the keys currently pending delivery to a Node. Does not include
+    /// keys the Node has already applied — operators wanting authoritative
+    /// state must read the Node directly until heartbeat-reported key sets
+    /// land.
+    /// </summary>
+    public async Task<List<string>> ListPendingEnvKeysAsync(Guid nodeId)
+    {
+        return await _dbContext.NodeEnvOps
+            .Where(o => o.NodeId == nodeId)
+            .Select(o => o.Key)
+            .Distinct()
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Compute which <c>tasks.tagged.&lt;hash&gt;</c> queue names a Node
+    /// should be subscribed to (P0-3a). A route applies to a Node iff the
+    /// Node's effective tags (static merged with overlay) are a superset of
+    /// the route's selector.
+    /// </summary>
+    public async Task<List<string>> GetTaggedSubscriptionsAsync(Guid nodeId)
+    {
+        var node = await _dbContext.Nodes.FindAsync(nodeId);
+        if (node is null) return new List<string>();
+
+        var effective = ComposeEffectiveTags(node.StaticTagsJson,
+            await _dbContext.NodeOverlayTags.Where(t => t.NodeId == nodeId).ToListAsync());
+        if (effective.Count == 0) return new List<string>();
+
+        var routes = await _dbContext.TaggedRoutes.ToListAsync();
+        var subscriptions = new List<string>();
+        foreach (var route in routes)
+        {
+            var selector = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(route.SelectorJson);
+            if (selector is null || selector.Count == 0) continue;
+            if (selector.All(req => effective.TryGetValue(req.Key, out var v) && v == req.Value))
+                subscriptions.Add($"tasks.tagged.{route.Hash}");
+        }
+        return subscriptions;
+    }
+
+    private static Dictionary<string, string> ComposeEffectiveTags(string? staticTagsJson, List<NodeOverlayTag> overlay)
+    {
+        var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in overlay) merged[t.Key] = t.Value;          // overlay first
+        if (!string.IsNullOrWhiteSpace(staticTagsJson))
+        {
+            try
+            {
+                var stat = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(staticTagsJson);
+                if (stat is not null)
+                    foreach (var (k, v) in stat) merged[k] = v;       // static wins (D6)
+            }
+            catch { /* malformed static tags — treat as empty */ }
+        }
+        return merged;
+    }
+
+    /// <summary>
     /// Apply add/remove operations to a node's overlay tags. Adds upsert by
     /// (NodeId, Key); removes delete by Key. Returns the merged effective
     /// overlay tag set after the changes.

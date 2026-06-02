@@ -1,6 +1,7 @@
 using Grpc.Net.Client;
 using Swarm.Cluster.Services;
 using Swarm.Node.Configuration;
+using Swarm.Node.Data;
 
 namespace Swarm.Node.Services;
 
@@ -9,7 +10,9 @@ public class HeartBeatService(
     GrpcChannel grpcChannel,
     ILogger<HeartBeatService> logger,
     RegistrationService registrationService,
-    NodeTagState tagState)
+    NodeTagState tagState,
+    EnvSecretsStore envSecrets,
+    IServiceProvider serviceProvider)
 {
     private readonly string _apiKey = configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey is not configured");
     private readonly IConfiguration _configuration = configuration;
@@ -17,6 +20,14 @@ public class HeartBeatService(
     private readonly GrpcChannel _grpcChannel = grpcChannel;
     private readonly RegistrationService _registrationService = registrationService;
     private readonly NodeTagState _tagState = tagState;
+    private readonly EnvSecretsStore _envSecrets = envSecrets;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+
+    /// <summary>
+    /// Op IDs from the previous heartbeat that were applied locally. The next
+    /// heartbeat request carries this list so the Cluster can delete the rows.
+    /// </summary>
+    private readonly List<string> _pendingAcks = new();
 
     // P2-1: NodeId is published into IConfiguration by NodeIdentityResolver
     // before any heartbeat fires. Read on demand so this singleton doesn't
@@ -30,12 +41,24 @@ public class HeartBeatService(
         try
         {
             var client = new NodesService.NodesServiceClient(_grpcChannel);
-            var response = await client.RecordHeartbeatAsync(new RecordHeartbeatRequest
+            var request = new RecordHeartbeatRequest
             {
                 NodeId = NodeId,
                 ApiKey = _apiKey,
                 IsOnline = true,
-            });
+            };
+
+            // P1-5a: ack ops applied since the previous heartbeat.
+            List<string> acksThisTick;
+            lock (_pendingAcks)
+            {
+                acksThisTick = new List<string>(_pendingAcks);
+                _pendingAcks.Clear();
+            }
+            foreach (var id in acksThisTick)
+                request.AckedEnvOpIds.Add(id);
+
+            var response = await client.RecordHeartbeatAsync(request);
 
             if (!response.Success && response.Message == "NodeNotFound")
             {
@@ -46,12 +69,56 @@ public class HeartBeatService(
             // P2-5: refresh overlay tags from the Cluster on every heartbeat.
             _tagState.SetOverlay(response.OverlayTags);
 
+            // P1-5a: apply env ops the Cluster pushed in this response.
+            await ApplyEnvOpsAsync(response.PendingEnvOps);
+
+            // P0-3a: reconcile tagged-queue subscriptions. Resolved via the
+            // service provider to avoid a hard ctor cycle (TaskExecutorService
+            // is also a singleton built later in the lifetime).
+            try
+            {
+                var executor = _serviceProvider.GetRequiredService<TaskExecutorService>();
+                await executor.EnsureTaggedSubscriptionsAsync(response.TaggedSubscriptions, default);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to reconcile tagged subscriptions");
+            }
+
             return response.Success;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending heartbeat to cluster");
             throw;
+        }
+    }
+
+    private async Task ApplyEnvOpsAsync(IReadOnlyList<EnvOp> ops)
+    {
+        if (ops.Count == 0) return;
+
+        foreach (var op in ops)
+        {
+            try
+            {
+                if (op.Kind == EnvOpKind.Set)
+                    await _envSecrets.SetAsync(op.Key, op.Value);
+                else
+                    await _envSecrets.DeleteAsync(op.Key);
+
+                lock (_pendingAcks) _pendingAcks.Add(op.Id);
+                _logger.LogInformation(
+                    "Applied env op {OpId} {Kind} {Key}", op.Id, op.Kind, op.Key);
+            }
+            catch (Exception ex)
+            {
+                // Leave the op un-acked — Cluster will re-send after the grace
+                // window. The operator should investigate if it keeps failing.
+                _logger.LogError(ex,
+                    "Failed to apply env op {OpId} {Kind} {Key}; will retry on next heartbeat",
+                    op.Id, op.Kind, op.Key);
+            }
         }
     }
 }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Swarm.Cluster.Data;
@@ -11,9 +12,11 @@ using Swarm.Cluster.Data;
 namespace Swarm.Cluster.Migrations
 {
     [DbContext(typeof(ClusterDbContext))]
-    partial class ClusterDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260602220738_P1_5a_NodeEnvOps")]
+    partial class P1_5a_NodeEnvOps
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -263,31 +266,6 @@ namespace Swarm.Cluster.Migrations
                         .HasFilter("\"PublishedAt\" IS NULL");
 
                     b.ToTable("PendingDispatches");
-                });
-
-            modelBuilder.Entity("Swarm.Cluster.Models.TaggedRoute", b =>
-                {
-                    b.Property<string>("Hash")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<DateTime>("FirstSeenAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("now()");
-
-                    b.Property<DateTime>("LastUsedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("now()");
-
-                    b.Property<string>("SelectorJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.HasKey("Hash");
-
-                    b.ToTable("TaggedRoutes");
                 });
 
             modelBuilder.Entity("Swarm.Cluster.Models.TaskDefinition", b =>

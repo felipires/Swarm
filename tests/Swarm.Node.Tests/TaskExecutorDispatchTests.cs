@@ -113,9 +113,11 @@ public class TaskExecutorDispatchTests
 
         var dataOptions = Options.Create(new DataConfiguration { ConnectionString = "Data Source=:memory:" });
         var db = new AppDbConnection(dataOptions, NullLogger<AppDbConnection>.Instance);
+        var envSecrets = new EnvSecretsStore(db, config, NullLogger<EnvSecretsStore>.Instance);
 
         return new TaskExecutorService(
             db,
+            envSecrets,
             config,
             NullLogger<TaskExecutorService>.Instance,
             NullLoggerFactory.Instance,

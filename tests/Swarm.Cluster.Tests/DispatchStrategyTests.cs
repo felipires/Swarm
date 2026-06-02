@@ -51,7 +51,10 @@ public class DispatchStrategyTests
     {
         using var db = BuildDb();
         var (definition, _) = await SeedAsync(db, taskType: "http@1", online: true);
-        // Deliberately add NO capability for http@1.
+        // SeedAsync now adds a capability for the seeded Node — strip it so
+        // we genuinely have no consumer advertising the TaskType.
+        db.NodeCapabilities.RemoveRange(db.NodeCapabilities);
+        await db.SaveChangesAsync();
         var service = new TaskDispatchService(db, NullLogger<TaskDispatchService>.Instance);
 
         var act = async () => await service.DispatchAsync(definition.Id, strategy: DispatchStrategy.AnyOnlineNode);
@@ -61,7 +64,7 @@ public class DispatchStrategyTests
     }
 
     [Fact]
-    public async Task TaggedNodes_PicksOneEligibleNode_AndDispatchesAsSpecific()
+    public async Task TaggedNodes_DispatchesToSharedTaggedQueue_WithNullNodeId()
     {
         using var db = BuildDb();
         var (definition, _) = await SeedAsync(db, taskType: "http@1", online: true);
@@ -81,6 +84,9 @@ public class DispatchStrategyTests
             StaticTagsJson = JsonSerializer.Serialize(new Dictionary<string, string> { ["region"] = "us" }),
         };
         db.Nodes.AddRange(euNode, usNode);
+        db.NodeCapabilities.AddRange(
+            new NodeCapability { Id = Guid.NewGuid(), NodeId = euNode.Id, TaskType = "http@1", JsonSchema = "{}", RequiredEnvKeysJson = "[]", RequiredParamsJson = "[]", ReportedAt = DateTime.UtcNow },
+            new NodeCapability { Id = Guid.NewGuid(), NodeId = usNode.Id, TaskType = "http@1", JsonSchema = "{}", RequiredEnvKeysJson = "[]", RequiredParamsJson = "[]", ReportedAt = DateTime.UtcNow });
         await db.SaveChangesAsync();
         var service = new TaskDispatchService(db, NullLogger<TaskDispatchService>.Instance);
 
@@ -89,7 +95,17 @@ public class DispatchStrategyTests
             strategy: DispatchStrategy.TaggedNodes,
             targetTags: new Dictionary<string, string> { ["region"] = "eu" });
 
-        instance.NodeId.Should().Be(euNode.Id, "only the eu-tagged Node satisfies the selector");
+        // New shape: shared queue, NodeId stays null until claim flow binds it.
+        instance.NodeId.Should().BeNull(
+            "TaggedNodes is now a real shared-queue strategy — the picking Node is bound via the claim flow");
+
+        // PendingDispatch row should target the deterministic tasks.tagged.<hash> queue.
+        var pending = await db.PendingDispatches.SingleAsync(p => p.InstanceId == instance.Id);
+        var hash = TaggedRouteHash.Compute(new Dictionary<string, string> { ["region"] = "eu" }).Hash;
+        pending.QueueName.Should().Be($"tasks.tagged.{hash}");
+
+        // TaggedRoute should be persisted so subsequent heartbeats can advertise it.
+        (await db.TaggedRoutes.AnyAsync(r => r.Hash == hash)).Should().BeTrue();
     }
 
     [Fact]
@@ -97,6 +113,8 @@ public class DispatchStrategyTests
     {
         using var db = BuildDb();
         var (definition, node) = await SeedAsync(db, taskType: "http@1", online: true);
+        // Seeded node already has the http@1 capability; give it tags that
+        // don't match the selector below so eligibility fails on tags alone.
         node.StaticTagsJson = JsonSerializer.Serialize(new Dictionary<string, string> { ["region"] = "us" });
         await db.SaveChangesAsync();
         var service = new TaskDispatchService(db, NullLogger<TaskDispatchService>.Instance);
@@ -136,6 +154,19 @@ public class DispatchStrategyTests
         };
         db.TaskDefinitions.Add(def);
         db.Nodes.Add(node);
+        // P0-3a now requires the eligible Node to advertise the TaskType for
+        // shared / tagged dispatch — seed the capability so the existing tests
+        // line up with the new query.
+        db.NodeCapabilities.Add(new NodeCapability
+        {
+            Id = Guid.NewGuid(),
+            NodeId = node.Id,
+            TaskType = taskType,
+            JsonSchema = "{}",
+            RequiredEnvKeysJson = "[]",
+            RequiredParamsJson = "[]",
+            ReportedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
         return (def, node);
     }

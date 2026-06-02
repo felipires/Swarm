@@ -13,20 +13,21 @@ namespace Swarm.Cluster.Validation;
 /// the controller can return a 400 instead of letting the message rot in
 /// the broker.
 ///
-/// Phase-1 scope (smaller than the roadmap's full vision):
+/// Checks performed:
 ///   • TaskType has at least one eligible online Node (UNSUPPORTED_TASK_TYPE).
+///   • Schemas advertised by eligible Nodes for the same TaskType@version
+///     are identical (CAPABILITY_DIVERGENCE).
 ///   • ConfigJson and RuntimeParamsJson are syntactically valid (INVALID_*_JSON).
+///   • ConfigJson passes the handler's JSON Schema after placeholder-aware
+///     substitution (CONFIG_SCHEMA_VIOLATION; D4 / P1-7a Cluster side).
 ///   • Every <c>{param:K:required}</c> placeholder has a matching key in
 ///     the supplied runtime params (MISSING_REQUIRED_PARAMS).
 ///   • Every key in the handler's <c>RequiredParams</c> is supplied
 ///     (MISSING_REQUIRED_PARAMS).
 ///   • Every key in the handler's <c>RequiredEnvKeys</c> is referenced by
 ///     the config placeholders (MISSING_REQUIRED_ENV_DECLARATION). Actual
-///     env presence on Nodes is deferred until the env-management API
+///     env presence on Nodes is checked once the env-management API
 ///     (P1-5a Cluster side) lands.
-///
-/// Deferred to follow-ups: full JSON Schema validation (would add a JSON
-/// Schema dependency), CAPABILITY_DIVERGENCE detection across Nodes.
 /// </summary>
 public class DispatchValidator
 {
@@ -44,11 +45,15 @@ public class DispatchValidator
         Guid? targetNodeId,
         CancellationToken cancellationToken)
     {
-        // 1. Config JSON must be parseable.
+        // 1. Config JSON must be parseable after placeholder substitution.
+        //    The raw text may contain value-position placeholders that aren't
+        //    valid JSON until substituted.
+        string preparedConfig;
         JsonElement configDoc;
         try
         {
-            configDoc = JsonDocument.Parse(definition.ConfigJson).RootElement.Clone();
+            preparedConfig = PlaceholderAwareSchemaValidator.SubstitutePlaceholders(definition.ConfigJson);
+            configDoc = JsonDocument.Parse(preparedConfig).RootElement.Clone();
         }
         catch (JsonException ex)
         {
@@ -84,6 +89,34 @@ public class DispatchValidator
                 "UNSUPPORTED_TASK_TYPE",
                 $"No online Node advertises TaskType '{definition.TaskType}'",
                 new { definition.TaskType });
+
+        // 3a. CAPABILITY_DIVERGENCE: per D3 the schema for a given
+        //     TaskType@version is immutable. If two eligible Nodes report
+        //     different schemas, that's a system-integrity bug.
+        var distinctSchemas = eligibleCaps
+            .Select(c => c.JsonSchema)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (distinctSchemas.Count > 1)
+            throw new DispatchValidationException(
+                "CAPABILITY_DIVERGENCE",
+                $"Eligible Nodes advertise different schemas for TaskType '{definition.TaskType}'",
+                new { definition.TaskType, SchemaCount = distinctSchemas.Count });
+
+        // 3b. CONFIG_SCHEMA_VIOLATION: validate the placeholder-substituted
+        //     config against the handler's schema. The Node re-validates
+        //     post-resolution (P1-7a Node side) which catches anything our
+        //     lenient surrogate values let through.
+        var schemaJson = distinctSchemas[0];
+        if (!string.IsNullOrWhiteSpace(schemaJson) && schemaJson != "{}")
+        {
+            var failures = PlaceholderAwareSchemaValidator.Validate(definition.ConfigJson, schemaJson);
+            if (failures.Count > 0)
+                throw new DispatchValidationException(
+                    "CONFIG_SCHEMA_VIOLATION",
+                    "Config does not satisfy handler schema",
+                    new { Failures = failures });
+        }
 
         // 4. Placeholder presence checks.
         var placeholders = PlaceholderParser.Extract(definition.ConfigJson);

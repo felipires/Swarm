@@ -12,6 +12,8 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
     public DbSet<PendingDispatch> PendingDispatches { get; set; } = null!;
     public DbSet<NodeOverlayTag> NodeOverlayTags { get; set; } = null!;
     public DbSet<NodeCapability> NodeCapabilities { get; set; } = null!;
+    public DbSet<NodeEnvOp> NodeEnvOps { get; set; } = null!;
+    public DbSet<TaggedRoute> TaggedRoutes { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -110,6 +112,29 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
                   .WithMany()
                   .HasForeignKey(e => e.NodeId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NodeEnvOp>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Op).IsRequired();
+            entity.Property(e => e.Key).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.HasIndex(e => e.NodeId);
+            entity.HasOne<Node>()
+                  .WithMany()
+                  .HasForeignKey(e => e.NodeId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TaggedRoute>(entity =>
+        {
+            entity.HasKey(e => e.Hash);
+            entity.Property(e => e.Hash).HasMaxLength(32);
+            entity.Property(e => e.SelectorJson).IsRequired().HasColumnType("jsonb");
+            entity.Property(e => e.FirstSeenAt).HasDefaultValueSql("now()").IsRequired();
+            entity.Property(e => e.LastUsedAt).HasDefaultValueSql("now()").IsRequired();
         });
     }
 }
