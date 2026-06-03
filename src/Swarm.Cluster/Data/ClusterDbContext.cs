@@ -14,6 +14,10 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
     public DbSet<NodeCapability> NodeCapabilities { get; set; } = null!;
     public DbSet<NodeEnvOp> NodeEnvOps { get; set; } = null!;
     public DbSet<TaggedRoute> TaggedRoutes { get; set; } = null!;
+    public DbSet<Pipeline> Pipelines { get; set; } = null!;
+    public DbSet<PipelineStep> PipelineSteps { get; set; } = null!;
+    public DbSet<PipelineRun> PipelineRuns { get; set; } = null!;
+    public DbSet<PipelineStepInstance> PipelineStepInstances { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -135,6 +139,63 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.Property(e => e.SelectorJson).IsRequired().HasColumnType("jsonb");
             entity.Property(e => e.FirstSeenAt).HasDefaultValueSql("now()").IsRequired();
             entity.Property(e => e.LastUsedAt).HasDefaultValueSql("now()").IsRequired();
+        });
+
+        modelBuilder.Entity<Pipeline>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Version).HasDefaultValue(1).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()").IsRequired();
+        });
+
+        modelBuilder.Entity<PipelineStep>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.DependsOnJson).IsRequired().HasColumnType("jsonb").HasDefaultValue("[]");
+            entity.Property(e => e.FailurePolicy).IsRequired();
+            entity.HasIndex(e => new { e.PipelineId, e.Name }).IsUnique();
+            entity.HasOne(e => e.Pipeline)
+                  .WithMany(p => p.Steps)
+                  .HasForeignKey(e => e.PipelineId)
+                  .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<TaskDefinition>()
+                  .WithMany()
+                  .HasForeignKey(e => e.TaskDefinitionId)
+                  .OnDelete(DeleteBehavior.Restrict);   // don't delete steps when a TaskDef is removed
+        });
+
+        modelBuilder.Entity<PipelineRun>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.StepsSnapshotJson).IsRequired().HasColumnType("jsonb").HasDefaultValue("[]");
+            entity.Property(e => e.Status).IsRequired();
+            entity.Property(e => e.StartedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.HasIndex(e => e.PipelineId);
+            entity.HasIndex(e => e.Status);
+            entity.HasOne<Pipeline>()
+                  .WithMany()
+                  .HasForeignKey(e => e.PipelineId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PipelineStepInstance>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Status).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.HasIndex(e => new { e.PipelineRunId, e.Status });
+            entity.HasIndex(e => e.TaskInstanceId).IsUnique().HasFilter("\"TaskInstanceId\" IS NOT NULL");
+            entity.HasOne<PipelineRun>()
+                  .WithMany()
+                  .HasForeignKey(e => e.PipelineRunId)
+                  .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
