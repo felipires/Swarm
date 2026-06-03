@@ -8,65 +8,61 @@ namespace Swarm.Cluster.Tests;
 public class TaskDispatchServiceTests
 {
     [Fact]
-    public void BuildMessage_PropagatesTaskTypeFromDefinition()
+    public void BuildMessage_ReadsTaskTypeFromInstanceSnapshot()
     {
-        var definition = new TaskDefinition
-        {
-            Id = Guid.NewGuid(),
-            Name = "http-sync",
-            TaskType = "http@1",
-            ConfigJson = """{"url":"https://example.com"}""",
-        };
         var instance = new TaskInstance
         {
             Id = Guid.NewGuid(),
-            TaskDefinitionId = definition.Id,
+            TaskDefinitionId = Guid.NewGuid(),
             NodeId = Guid.NewGuid(),
+            TaskType = "http@1",
+            ConfigJsonSnapshot = """{"url":"https://example.com"}""",
         };
 
-        var message = TaskDispatchService.BuildMessage(instance, definition);
+        var message = TaskDispatchService.BuildMessage(instance);
 
         message.TaskType.Should().Be("http@1");
         message.InstanceId.Should().Be(instance.Id);
-        message.TaskDefinitionId.Should().Be(definition.Id);
+        message.TaskDefinitionId.Should().Be(instance.TaskDefinitionId);
         message.NodeId.Should().Be(instance.NodeId);
-        message.ConfigJson.Should().Be(definition.ConfigJson);
+        message.ConfigJson.Should().Be(instance.ConfigJsonSnapshot);
     }
 
     [Fact]
-    public void BuildMessage_NewTaskDefinition_DefaultsToDefaultAt1()
+    public void BuildMessage_DefaultsTaskTypeToDefaultAt1WhenInstanceUnpopulated()
     {
-        // A freshly-constructed TaskDefinition carries the model default per D3.
-        var definition = new TaskDefinition { Id = Guid.NewGuid(), Name = "x" };
-        var instance = new TaskInstance { Id = Guid.NewGuid(), TaskDefinitionId = definition.Id, NodeId = Guid.NewGuid() };
-
-        var message = TaskDispatchService.BuildMessage(instance, definition);
-
-        message.TaskType.Should().Be("default@1");
-    }
-
-    [Fact]
-    public void BuildMessage_PreservesConfigJsonAndNodeId()
-    {
-        var nodeId = Guid.NewGuid();
-        var definition = new TaskDefinition
-        {
-            Id = Guid.NewGuid(),
-            Name = "sql-extract",
-            TaskType = "sql@2",
-            ConfigJson = """{"query":"SELECT 1"}""",
-        };
+        // Fresh-constructed TaskInstance carries the snapshot defaults
+        // (TaskType = "default@1", ConfigJsonSnapshot = "{}").
         var instance = new TaskInstance
         {
             Id = Guid.NewGuid(),
-            TaskDefinitionId = definition.Id,
-            NodeId = nodeId,
+            TaskDefinitionId = Guid.NewGuid(),
+            NodeId = Guid.NewGuid(),
         };
 
-        var message = TaskDispatchService.BuildMessage(instance, definition);
+        var message = TaskDispatchService.BuildMessage(instance);
+
+        message.TaskType.Should().Be("default@1");
+        message.ConfigJson.Should().Be("{}");
+    }
+
+    [Fact]
+    public void BuildMessage_PreservesConfigSnapshotAndNullableNodeId()
+    {
+        var instance = new TaskInstance
+        {
+            Id = Guid.NewGuid(),
+            TaskDefinitionId = Guid.NewGuid(),
+            NodeId = null, // shared-queue dispatch — NodeId nullable until claim
+            TaskType = "sql@2",
+            ConfigJsonSnapshot = """{"query":"SELECT 1"}""",
+            RuntimeParamsJson = """{"tenant":"acme"}""",
+        };
+
+        var message = TaskDispatchService.BuildMessage(instance);
 
         message.ConfigJson.Should().Be("""{"query":"SELECT 1"}""");
-        message.NodeId.Should().Be(nodeId);
-        message.TaskType.Should().Be("sql@2");
+        message.NodeId.Should().BeNull();
+        message.RuntimeParamsJson.Should().Be("""{"tenant":"acme"}""");
     }
 }

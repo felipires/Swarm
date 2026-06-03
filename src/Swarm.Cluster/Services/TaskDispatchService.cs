@@ -20,7 +20,6 @@ public class TaskDispatchService
     private readonly ClusterDbContext _dbContext;
     private readonly ILogger<TaskDispatchService> _logger;
     private readonly DispatchValidator? _validator;
-    private readonly Random _picker = new();
 
     /// <summary>
     /// Two-arg constructor for tests that want to bypass the dispatch validator
@@ -79,7 +78,7 @@ public class TaskDispatchService
         if (node.Status != Node.NodeStatus.Online)
             throw new InvalidOperationException($"Node {nodeId} is not online");
 
-        var instance = NewInstance(definition.Id, nodeId, runtimeParamsJson);
+        var instance = NewInstance(definition, nodeId, runtimeParamsJson);
         await PersistDispatchAsync(instance, definition, TaskQueueName(nodeId));
         _logger.LogInformation(
             "Enqueued task instance {InstanceId} for dispatch to node {NodeId}", instance.Id, nodeId);
@@ -97,7 +96,7 @@ public class TaskDispatchService
             throw new InvalidOperationException(
                 $"No online Node currently advertises TaskType '{definition.TaskType}'");
 
-        var instance = NewInstance(definition.Id, nodeId: null, runtimeParamsJson);
+        var instance = NewInstance(definition, nodeId: null, runtimeParamsJson);
         await PersistDispatchAsync(instance, definition, SharedQueueName(definition.TaskType));
         _logger.LogInformation(
             "Enqueued task instance {InstanceId} on shared queue for TaskType {TaskType}",
@@ -140,7 +139,7 @@ public class TaskDispatchService
             existing.LastUsedAt = now;
         }
 
-        var instance = NewInstance(definition.Id, nodeId: null, runtimeParamsJson);
+        var instance = NewInstance(definition, nodeId: null, runtimeParamsJson);
         await PersistDispatchAsync(instance, definition, queueName);
         _logger.LogInformation(
             "Enqueued instance {InstanceId} on tagged shared queue {Queue} (selector {Selector}, {Count} eligible Node(s))",
@@ -180,6 +179,45 @@ public class TaskDispatchService
     /// <c>AddRange</c> + transaction so a 100-node fleet incurs one round
     /// trip instead of one per Node.
     /// </summary>
+    /// <summary>
+    /// Re-emit an existing <see cref="TaskInstance"/> to the broker (P1-2).
+    /// Called by <c>RetrySchedulerService</c> when a Pending instance's
+    /// <c>RetryAfter</c> is due. Reuses the instance's snapshotted payload —
+    /// retries run with the same config as the original attempt.
+    /// </summary>
+    public async Task RedispatchAsync(Guid instanceId, CancellationToken cancellationToken)
+    {
+        var instance = await _dbContext.TaskInstances.FindAsync([instanceId], cancellationToken)
+            ?? throw new InvalidOperationException($"TaskInstance {instanceId} not found");
+        if (instance.Status != TaskInstance.TaskInstanceStatus.Pending)
+            throw new InvalidOperationException(
+                $"TaskInstance {instanceId} is not Pending (Status={instance.Status})");
+
+        var queueName = instance.NodeId is { } nodeId
+            ? TaskQueueName(nodeId)
+            : SharedQueueName(instance.TaskType);
+
+        var pending = new PendingDispatch
+        {
+            Id = Guid.NewGuid(),
+            InstanceId = instance.Id,
+            QueueName = queueName,
+            Payload = JsonSerializer.Serialize(BuildMessage(instance)),
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        await using var tx = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        _dbContext.PendingDispatches.Add(pending);
+        instance.Transition(TaskInstance.TaskInstanceStatus.Dispatched);
+        instance.DispatchedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Redispatched task instance {InstanceId} (retry #{RetryCount}) to {Queue}",
+            instance.Id, instance.RetryCount, queueName);
+    }
+
     public async Task<List<TaskInstance>> DispatchToAllOnlineAsync(Guid taskDefinitionId, string? runtimeParamsJson = null)
     {
         var definition = await _dbContext.TaskDefinitions.FindAsync(taskDefinitionId)
@@ -203,14 +241,14 @@ public class TaskDispatchService
         var pendings = new List<PendingDispatch>(onlineNodeIds.Count);
         foreach (var nodeId in onlineNodeIds)
         {
-            var instance = NewInstance(definition.Id, nodeId, runtimeParamsJson);
+            var instance = NewInstance(definition, nodeId, runtimeParamsJson);
             instances.Add(instance);
             pendings.Add(new PendingDispatch
             {
                 Id = Guid.NewGuid(),
                 InstanceId = instance.Id,
                 QueueName = TaskQueueName(nodeId),
-                Payload = JsonSerializer.Serialize(BuildMessage(instance, definition)),
+                Payload = JsonSerializer.Serialize(BuildMessage(instance)),
                 CreatedAt = DateTime.UtcNow,
             });
         }
@@ -226,18 +264,27 @@ public class TaskDispatchService
         return instances;
     }
 
-    private static TaskInstance NewInstance(Guid taskDefinitionId, Guid? nodeId, string? runtimeParamsJson = null) => new()
+    /// <summary>
+    /// Construct a new <see cref="TaskInstance"/> with the TaskDefinition's
+    /// TaskType / ConfigJson / Version snapshotted (P1-4). The snapshot is
+    /// the authoritative payload for everything downstream — subsequent
+    /// edits to the definition don't affect in-flight instances.
+    /// </summary>
+    private static TaskInstance NewInstance(TaskDefinition definition, Guid? nodeId, string? runtimeParamsJson = null) => new()
     {
         Id = Guid.NewGuid(),
-        TaskDefinitionId = taskDefinitionId,
+        TaskDefinitionId = definition.Id,
         NodeId = nodeId,
+        TaskType = definition.TaskType,
+        ConfigJsonSnapshot = definition.ConfigJson,
+        TaskDefinitionVersion = definition.Version,
         RuntimeParamsJson = runtimeParamsJson,
         CreatedAt = DateTime.UtcNow,
     };
 
     private async Task PersistDispatchAsync(TaskInstance instance, TaskDefinition definition, string queueName)
     {
-        var message = BuildMessage(instance, definition);
+        var message = BuildMessage(instance);
         var pending = new PendingDispatch
         {
             Id = Guid.NewGuid(),
@@ -254,13 +301,18 @@ public class TaskDispatchService
         await tx.CommitAsync();
     }
 
-    internal static TaskMessage BuildMessage(TaskInstance instance, TaskDefinition definition) => new()
+    /// <summary>
+    /// Build the wire payload from the instance's snapshot (P1-4). The
+    /// snapshot is captured at dispatch time so what the Node sees is
+    /// immune to subsequent definition edits.
+    /// </summary>
+    internal static TaskMessage BuildMessage(TaskInstance instance) => new()
     {
         InstanceId = instance.Id,
-        TaskDefinitionId = definition.Id,
+        TaskDefinitionId = instance.TaskDefinitionId,
         NodeId = instance.NodeId,
-        TaskType = definition.TaskType,
-        ConfigJson = definition.ConfigJson,
+        TaskType = instance.TaskType,
+        ConfigJson = instance.ConfigJsonSnapshot,
         RuntimeParamsJson = instance.RuntimeParamsJson,
     };
 

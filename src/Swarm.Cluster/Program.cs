@@ -56,6 +56,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<LogConsumerService
 builder.Services.AddHostedService<TaskResultConsumerService>();
 builder.Services.AddHostedService<OutboxPublisherService>();
 builder.Services.AddHostedService<TaskClaimsConsumerService>();
+builder.Services.AddHostedService<RetrySchedulerService>();
 builder.Services.AddHostedService<LogRetentionService>();
 
 builder.Services.AddControllers()

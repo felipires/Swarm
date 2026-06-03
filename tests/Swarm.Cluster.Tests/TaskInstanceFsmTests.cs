@@ -41,7 +41,8 @@ public class TaskInstanceFsmTests
     [InlineData(TaskInstanceStatus.Failed, TaskInstanceStatus.Completed)]
     [InlineData(TaskInstanceStatus.Pending, TaskInstanceStatus.Running)]   // must go via Dispatched/Claimed
     [InlineData(TaskInstanceStatus.Pending, TaskInstanceStatus.Completed)]
-    [InlineData(TaskInstanceStatus.Dispatched, TaskInstanceStatus.Pending)]
+    // Dispatched → Pending and Running → Pending are NOW allowed (P1-2
+    // retry path), so they were removed from this forbidden-edge sweep.
     public void Transition_ForbiddenEdge_Throws(TaskInstanceStatus from, TaskInstanceStatus to)
     {
         var instance = BuildAt(from);

@@ -4,6 +4,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.Models;
+using Swarm.Cluster.Services;
 using Swarm.Sdk.Wire;
 
 namespace Swarm.Cluster.Services;
@@ -109,6 +110,43 @@ public class TaskResultConsumerService : BackgroundService
         {
             _logger.LogWarning("Received result for unknown task instance {InstanceId}", result.InstanceId);
             return;
+        }
+
+        // P1-2: on failure, route through the retry decision before flipping
+        // to terminal Failed. If the definition still allows retries we
+        // transition Dispatched/Running → Pending, increment RetryCount, and
+        // set RetryAfter so RetrySchedulerService can pick it up.
+        if (!result.Success)
+        {
+            var definition = await db.TaskDefinitions.FindAsync(instance.TaskDefinitionId);
+            if (definition is not null && instance.RetryCount < definition.MaxRetries)
+            {
+                var nextAttempt = instance.RetryCount + 1;
+                var delay = RetryDelayCalculator.ComputeDelay(
+                    definition.RetryBackoff, definition.RetryDelaySeconds, nextAttempt);
+
+                try
+                {
+                    instance.Transition(TaskInstance.TaskInstanceStatus.Pending);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Ignoring late retry attempt for instance {InstanceId} (Status={Status})",
+                        instance.Id, instance.Status);
+                    return;
+                }
+
+                instance.RetryCount = nextAttempt;
+                instance.RetryAfter = DateTime.UtcNow + delay;
+                instance.ErrorMessage = result.ErrorMessage;
+                await db.SaveChangesAsync();
+
+                _logger.LogInformation(
+                    "Instance {InstanceId} failure scheduled for retry #{Attempt} at {RetryAfter:O} (delay {Delay})",
+                    instance.Id, nextAttempt, instance.RetryAfter, delay);
+                return;
+            }
         }
 
         var next = result.Success

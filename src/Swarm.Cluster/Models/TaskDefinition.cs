@@ -31,6 +31,23 @@ public class TaskDefinition
     /// <summary>JSON payload passed to the node when executing this task.</summary>
     public string ConfigJson { get; set; } = "{}";
 
+    /// <summary>
+    /// Monotonically increasing on every edit (P1-4). Snapshotted into
+    /// <see cref="TaskInstance.TaskDefinitionVersion"/> at dispatch so an
+    /// instance's lineage is traceable even if the definition is edited
+    /// later.
+    /// </summary>
+    public int Version { get; set; } = 1;
+
+    /// <summary>Maximum retry attempts on failure (P1-2). 0 disables retries.</summary>
+    public int MaxRetries { get; set; } = 0;
+
+    /// <summary>Base delay between retry attempts, in seconds.</summary>
+    public int RetryDelaySeconds { get; set; } = 60;
+
+    /// <summary>Backoff function applied to <see cref="RetryDelaySeconds"/>.</summary>
+    public RetryBackoffStrategy RetryBackoff { get; set; } = RetryBackoffStrategy.Fixed;
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
