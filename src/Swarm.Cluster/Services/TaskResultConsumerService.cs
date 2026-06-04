@@ -86,6 +86,15 @@ public class TaskResultConsumerService : BackgroundService
             }
 
             await UpdateInstanceAsync(result);
+            // P1-1: notify the pipeline step advancer in case this TaskInstance
+            // is part of a pipeline. The advancer queues the work and returns
+            // immediately — this won't slow the result-consumer hot path.
+            using (var advancerScope = _serviceProvider.CreateScope())
+            {
+                var advancer = advancerScope.ServiceProvider
+                    .GetRequiredService<Swarm.Cluster.Services.Pipelines.IStepAdvancer>();
+                await advancer.NotifyAsync(result.InstanceId, CancellationToken.None);
+            }
             _channel!.BasicAck(ea.DeliveryTag, false);
         }
         catch (Exception ex)

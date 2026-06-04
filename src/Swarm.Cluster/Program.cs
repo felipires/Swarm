@@ -50,6 +50,19 @@ builder.Services.AddSingleton<IConnection>(_ =>
 builder.Services.AddScoped<NodeService>();
 builder.Services.AddScoped<TaskDispatchService>();
 builder.Services.AddScoped<Swarm.Cluster.Validation.DispatchValidator>();
+
+// Pipelines (P1-1): PipelineService + PipelineRunExecutor are scoped (each
+// request / each advancement gets its own DbContext). InProcessStepAdvancer
+// is the singleton bridge — it owns the Channel and creates a fresh scope
+// per work item.
+builder.Services.AddScoped<Swarm.Cluster.Services.Pipelines.PipelineService>();
+builder.Services.AddScoped<Swarm.Cluster.Services.Pipelines.PipelineRunExecutor>();
+builder.Services.AddSingleton<Swarm.Cluster.Services.Pipelines.InProcessStepAdvancer>();
+builder.Services.AddSingleton<Swarm.Cluster.Services.Pipelines.IStepAdvancer>(
+    sp => sp.GetRequiredService<Swarm.Cluster.Services.Pipelines.InProcessStepAdvancer>());
+builder.Services.AddHostedService(
+    sp => sp.GetRequiredService<Swarm.Cluster.Services.Pipelines.InProcessStepAdvancer>());
+
 builder.Services.AddSingleton<LogConsumerService>();
 builder.Services.AddHostedService<HeartbeatBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LogConsumerService>());
