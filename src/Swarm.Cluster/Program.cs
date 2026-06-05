@@ -82,6 +82,7 @@ builder.Services.AddHostedService<OutboxPublisherService>();
 builder.Services.AddHostedService<TaskClaimsConsumerService>();
 builder.Services.AddHostedService<RetrySchedulerService>();
 builder.Services.AddHostedService<LogRetentionService>();
+builder.Services.AddHostedService<TaggedRouteRetentionService>();
 
 builder.Services.AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));

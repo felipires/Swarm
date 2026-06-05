@@ -144,6 +144,8 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.Property(e => e.SelectorJson).IsRequired().HasColumnType("jsonb");
             entity.Property(e => e.FirstSeenAt).HasDefaultValueSql("now()").IsRequired();
             entity.Property(e => e.LastUsedAt).HasDefaultValueSql("now()").IsRequired();
+            // Backs the TaggedRouteRetentionService sweep (range scan on LastUsedAt).
+            entity.HasIndex(e => e.LastUsedAt);
         });
 
         modelBuilder.Entity<Pipeline>(entity =>
