@@ -34,6 +34,7 @@ public sealed class SqlHandlerV1 : ITaskHandler
               }
             }
             """,
+            RequiredParams = ["connectionString", "query"]
     };
 
     public async Task<TaskResult> HandleAsync(TaskContext context)

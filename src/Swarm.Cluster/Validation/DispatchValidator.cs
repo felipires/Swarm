@@ -120,6 +120,14 @@ public class DispatchValidator
 
         // 4. Placeholder presence checks.
         var placeholders = PlaceholderParser.Extract(definition.ConfigJson);
+
+        if (!placeholders.Any() && string.IsNullOrEmpty(runtimeParamsJson))
+        {
+            // Here we are assuming that the config has the values by itself since there is no placeholder
+            // and caller do not forwarded runtimeParams
+            paramsDoc = configDoc;
+        }
+
         var missingRequiredParams = placeholders
             .Where(p => p.Source == "param" && p.Modifiers.Contains("required"))
             .Select(p => p.Key)

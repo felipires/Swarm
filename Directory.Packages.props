@@ -1,5 +1,10 @@
 <Project>
 
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);NU1701;NU1603;NU1903</NoWarn>
+  </PropertyGroup>
+
+
   <ItemGroup>
     <!-- AspNetCore / Web -->
     <PackageVersion Include="Grpc.AspNetCore" Version="2.76.0" />

@@ -39,7 +39,7 @@ public sealed class PostgresJsonbTagMatcher : ITagMatchStrategy
                 JOIN "NodeCapabilities" c ON c."NodeId" = n."Id"
                 WHERE n."Status" = 0
                   AND c."TaskType" = {taskType}
-                  AND n."EffectiveTags" @> {selectorJson}::jsonb
+                  AND n."EffectiveTagsJson" @> {selectorJson}::jsonb
                 """)
             .ToListAsync(cancellationToken);
         return ids;
@@ -56,8 +56,8 @@ public sealed class PostgresJsonbTagMatcher : ITagMatchStrategy
                 SELECT r."Hash" AS "Value"
                 FROM "TaggedRoutes" r
                 JOIN "Nodes" n ON n."Id" = {nodeId}
-                WHERE n."EffectiveTags" IS NOT NULL
-                  AND n."EffectiveTags" @> r."SelectorJson"
+                WHERE n."EffectiveTagsJson" IS NOT NULL
+                  AND n."EffectiveTagsJson" @> r."SelectorJson"
                 """)
             .ToListAsync(cancellationToken);
         return hashes;

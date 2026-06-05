@@ -35,6 +35,7 @@ public record TaskMessage
 public record TaskResultMessage
 {
     public Guid InstanceId { get; init; }
+    public Guid? NodeId { get; set; }
     public bool Success { get; init; }
     public string? ResultJson { get; init; }
     public string? ErrorMessage { get; init; }

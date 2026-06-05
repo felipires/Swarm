@@ -56,6 +56,12 @@ var builder = Host.CreateDefaultBuilder(args)
         tagState.SetStatic(TagDiscovery.Discover(configuration));
         services.AddSingleton(tagState);
 
+        // Built-in task handlers (P1-5).
+        services.AddTaskHandler<DefaultPassthroughHandler>();
+        services.AddTaskHandler<HttpHandlerV1>();
+        services.AddTaskHandler<SqlHandlerV1>();
+        services.AddTaskHandler<WebhookHandlerV1>();
+
         // Add services
         services.AddSingleton<BackgroundMaestro>();
         services.AddSingleton<AppDbConnection>();
@@ -63,12 +69,6 @@ var builder = Host.CreateDefaultBuilder(args)
         services.AddSingleton<RegistrationService>();
         services.AddSingleton<HeartBeatService>();
         services.AddSingleton<TaskExecutorService>();
-
-        // Built-in task handlers (P1-5).
-        services.AddTaskHandler<DefaultPassthroughHandler>();
-        services.AddTaskHandler<HttpHandlerV1>();
-        services.AddTaskHandler<SqlHandlerV1>();
-        services.AddTaskHandler<WebhookHandlerV1>();
 
         // Optional plugin scan: load ITaskHandler implementations from a directory.
         // TODO P4-3: trust model — Assembly.LoadFrom on an unsanitized path is unsafe

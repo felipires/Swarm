@@ -168,6 +168,7 @@ public class TaskExecutorService : IAsyncDisposable
         {
             var json = Encoding.UTF8.GetString(ea.Body.ToArray());
             message = JsonSerializer.Deserialize<TaskMessage>(json);
+            var nodeId = _configuration["NodeId"];
 
             if (message == null)
             {
@@ -197,6 +198,7 @@ public class TaskExecutorService : IAsyncDisposable
                 Success = result.Success,
                 ResultJson = result.ResultJson,
                 ErrorMessage = result.ErrorMessage,
+                NodeId = Guid.Parse(nodeId!)
             }, cancellationToken);
 
             await _channel!.BasicAckAsync(ea.DeliveryTag, false, cancellationToken);

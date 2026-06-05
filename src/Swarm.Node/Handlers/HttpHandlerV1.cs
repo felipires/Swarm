@@ -35,6 +35,7 @@ public sealed class HttpHandlerV1 : ITaskHandler
               }
             }
             """,
+            RequiredParams = ["method", "url"]
     };
 
     public async Task<TaskResult> HandleAsync(TaskContext context)

@@ -33,6 +33,7 @@ public sealed class WebhookHandlerV1 : ITaskHandler
               }
             }
             """,
+            RequiredParams = ["url", "secret"]
     };
 
     public async Task<TaskResult> HandleAsync(TaskContext context)

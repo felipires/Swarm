@@ -121,6 +121,8 @@ public class TaskResultConsumerService : BackgroundService
             return;
         }
 
+        instance.NodeId = result.NodeId;
+
         // P1-2: on failure, route through the retry decision before flipping
         // to terminal Failed. If the definition still allows retries we
         // transition Dispatched/Running → Pending, increment RetryCount, and

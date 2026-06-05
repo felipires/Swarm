@@ -83,8 +83,10 @@ public class TaskInstance
         new Dictionary<TaskInstanceStatus, TaskInstanceStatus[]>
         {
             [TaskInstanceStatus.Pending]    = [TaskInstanceStatus.Claimed, TaskInstanceStatus.Dispatched, TaskInstanceStatus.Failed],
-            [TaskInstanceStatus.Claimed]    = [TaskInstanceStatus.Running, TaskInstanceStatus.Failed, TaskInstanceStatus.Pending],
+            [TaskInstanceStatus.Claimed]    = [TaskInstanceStatus.Running, TaskInstanceStatus.Failed, TaskInstanceStatus.Pending, TaskInstanceStatus.Completed],
             [TaskInstanceStatus.Dispatched] = [TaskInstanceStatus.Running, TaskInstanceStatus.Completed, TaskInstanceStatus.Failed, TaskInstanceStatus.Pending],
+            // unused today, because when worker claim the task, itinstantly dispatch job execution and publish the result
+            // but it can stay in case wee need implement a pause/control of tasks
             [TaskInstanceStatus.Running]    = [TaskInstanceStatus.Completed, TaskInstanceStatus.Failed, TaskInstanceStatus.Pending],
             [TaskInstanceStatus.Completed]  = [],
             [TaskInstanceStatus.Failed]     = [TaskInstanceStatus.Pending],   // manual retry path
