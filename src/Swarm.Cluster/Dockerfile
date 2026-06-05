@@ -1,9 +1,19 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-COPY ["Swarm.Cluster.csproj", "."]
+# Copy project files
+COPY ["src/Swarm.Cluster/Swarm.Cluster.csproj", "src/Swarm.Cluster/"]
+COPY ["src/Swarm.Node.Sdk/Swarm.Node.Sdk.csproj", "src/Swarm.Node.Sdk/"]
+COPY ["Directory.Packages.props", "."]
+
+# Restore dependencies
+WORKDIR /src/src/Swarm.Cluster
 RUN dotnet restore "Swarm.Cluster.csproj"
-COPY . .
+
+# Copy source code
+COPY . /src
+
+# Build
 RUN dotnet build "Swarm.Cluster.csproj" -c Release -o /app/build
 
 FROM build AS publish

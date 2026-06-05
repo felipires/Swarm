@@ -53,8 +53,8 @@ services:
 
   cluster:
     build:
-      context: ./../src/Swarm.Cluster
-      dockerfile: Dockerfile
+      context: ./../
+      dockerfile: src/Swarm.Cluster/Dockerfile
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=swarm_cluster;Username=postgres;Password=postgres"
       Redis__Connection: "redis:6379"
@@ -77,8 +77,8 @@ services:
 
   node:
     build:
-      context: ./../src/Swarm.Node
-      dockerfile: Dockerfile
+      context: ./../
+      dockerfile: src/Swarm.Node/Dockerfile
     environment:
       ClusterUrl: "http://cluster:5000"
       RabbitMQ__Hostname: "rabbitmq"
