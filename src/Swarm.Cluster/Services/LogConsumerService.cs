@@ -22,6 +22,7 @@ public partial class LogConsumerService : BackgroundService
     private readonly NpgsqlDataSource _db;
     private IModel? _channel;
     private CancellationToken _stoppingToken;
+    private readonly object _channelLock = new();
 
     private readonly object _bufferLock = new();
     private readonly Dictionary<Guid, List<Log>> _logBuffer = new();
@@ -129,21 +130,61 @@ public partial class LogConsumerService : BackgroundService
                             sub.Writer.TryWrite(logEntry);
                 }
 
-                _channel!.BasicAck(ea.DeliveryTag, false);
+                AckMessage(ea.DeliveryTag);
             }
             else
             {
                 _logger.LogWarning("Failed to parse log message from RabbitMQ");
-                _channel!.BasicNack(ea.DeliveryTag, false, true);
+                NackMessage(ea.DeliveryTag, requeue: false);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing log message from RabbitMQ");
-            try { _channel!.BasicNack(ea.DeliveryTag, false, true); } catch { }
+            NackMessage(ea.DeliveryTag, requeue: true);
         }
 
         return Task.CompletedTask;
+    }
+
+    private void AckMessage(ulong deliveryTag)
+    {
+        lock (_channelLock)
+        {
+            try
+            {
+                if (_channel is { IsOpen: true })
+                    _channel.BasicAck(deliveryTag, false);
+            }
+            catch (ObjectDisposedException)
+            {
+                _logger.LogDebug("Channel disposed before acknowledgment - likely connection recovery");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to acknowledge message");
+            }
+        }
+    }
+
+    private void NackMessage(ulong deliveryTag, bool requeue)
+    {
+        lock (_channelLock)
+        {
+            try
+            {
+                if (_channel is { IsOpen: true })
+                    _channel.BasicNack(deliveryTag, false, requeue);
+            }
+            catch (ObjectDisposedException)
+            {
+                _logger.LogDebug("Channel disposed before nack - likely connection recovery");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to nack message");
+            }
+        }
     }
 
     private Log? ParseLogMessage(string message, IBasicProperties properties)
@@ -465,7 +506,10 @@ public partial class LogConsumerService : BackgroundService
         var pending = nodeIds.Select(id => FlushLogsForNodeAsync(id, cancellationToken));
         await Task.WhenAll(pending);
 
-        _channel?.Dispose();
+        lock (_channelLock)
+        {
+            _channel?.Dispose();
+        }
 
         await base.StopAsync(cancellationToken);
     }

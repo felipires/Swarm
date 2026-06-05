@@ -27,7 +27,7 @@ public class RetrySchedulerService : BackgroundService
         _scopeFactory = scopeFactory;
         _logger = logger;
         _pollInterval = TimeSpan.FromSeconds(
-            configuration.GetValue<int>("Retry:PollIntervalSeconds", 10));
+            configuration.GetValue<int>("Retry:PollIntervalSeconds", 30));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

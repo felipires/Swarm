@@ -18,7 +18,7 @@ public class OutboxPublisherService : BackgroundService
     private readonly ILogger<OutboxPublisherService> _logger;
 
     private const int BatchSize = 50;
-    private const int IdlePollIntervalMs = 1000;
+    private const int IdlePollIntervalMs = 1000 * 30;
 
     public OutboxPublisherService(
         IServiceScopeFactory scopeFactory,

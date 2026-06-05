@@ -1,7 +1,8 @@
 import axios, { AxiosInstance } from "axios";
 import type { Node, TaskDefinition, TaskInstance } from "../store/store";
 
-const BASE_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:5001/api";
+const BASE_URL =
+  (import.meta as any).env.VITE_API_URL || "http://localhost:5001/api";
 
 class ApiClient {
   private client: AxiosInstance;
@@ -15,8 +16,10 @@ class ApiClient {
 
   // Nodes
   async getNodes(status?: "Online" | "Offline"): Promise<Node[]> {
-    const response = await this.client.get("/nodes", { params: status ? { status } : {} });
-    return response.data;
+    const response = await this.client.get("/nodes", {
+      params: status ? { status } : {},
+    });
+    return response.data.items;
   }
 
   async getNode(id: string): Promise<Node> {
@@ -31,7 +34,7 @@ class ApiClient {
   // Tasks
   async getTasks(): Promise<TaskDefinition[]> {
     const response = await this.client.get("/tasks");
-    return response.data;
+    return response.data.items;
   }
 
   async getTask(id: string): Promise<TaskDefinition> {
@@ -39,8 +42,16 @@ class ApiClient {
     return response.data;
   }
 
-  async createTask(name: string, description: string, configJson: string): Promise<TaskDefinition> {
-    const response = await this.client.post("/tasks", { name, description, configJson });
+  async createTask(
+    name: string,
+    description: string,
+    configJson: string,
+  ): Promise<TaskDefinition> {
+    const response = await this.client.post("/tasks", {
+      name,
+      description,
+      configJson,
+    });
     return response.data;
   }
 
@@ -50,7 +61,9 @@ class ApiClient {
 
   // Dispatch
   async dispatchTask(taskId: string, nodeId: string): Promise<TaskInstance> {
-    const response = await this.client.post(`/tasks/${taskId}/dispatch`, { nodeId });
+    const response = await this.client.post(`/tasks/${taskId}/dispatch`, {
+      nodeId,
+    });
     return response.data;
   }
 
