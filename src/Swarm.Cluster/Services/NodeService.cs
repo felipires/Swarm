@@ -15,13 +15,15 @@ public class NodeService
     private readonly ClusterDbContext _dbContext;
     private readonly ILogger<NodeService> _logger;
     private readonly IConfiguration _config;
+    private readonly Tags.ITagMatchStrategy _tagMatcher;
     private readonly int _heartbeatTimeoutSeconds;
 
-    public NodeService(ClusterDbContext dbContext, ILogger<NodeService> logger, IConfiguration config)
+    public NodeService(ClusterDbContext dbContext, ILogger<NodeService> logger, IConfiguration config, Tags.ITagMatchStrategy tagMatcher)
     {
         _dbContext = dbContext;
         _logger = logger;
         _config = config;
+        _tagMatcher = tagMatcher;
         _heartbeatTimeoutSeconds = config.GetValue<int>("Heartbeat:TimeoutSeconds", 300);
     }
 
@@ -46,11 +48,21 @@ public class NodeService
             ? await _dbContext.Nodes.FirstOrDefaultAsync(n => n.Id == resolvedId)
             : null;
 
+        // P3-3: recompute the denormalized effective-tag projection. A
+        // re-registering Node keeps its overlay tags, so merge the new static
+        // set against whatever overlay rows currently exist. A brand-new Node
+        // has none.
+        var overlay = node is not null
+            ? await _dbContext.NodeOverlayTags.Where(t => t.NodeId == resolvedId).ToListAsync()
+            : new List<NodeOverlayTag>();
+        var effectiveTagsJson = Tags.EffectiveTags.ComposeJson(staticTagsJson, overlay);
+
         if (node is not null)
         {
             node.Status = Node.NodeStatus.Online;
             node.LastHeartbeatAt = DateTime.UtcNow;
             node.StaticTagsJson = staticTagsJson;
+            node.EffectiveTagsJson = effectiveTagsJson;
         }
         else
         {
@@ -62,6 +74,7 @@ public class NodeService
                 CreatedAt = DateTime.UtcNow,
                 LastHeartbeatAt = DateTime.UtcNow,
                 StaticTagsJson = staticTagsJson,
+                EffectiveTagsJson = effectiveTagsJson,
             };
             _dbContext.Nodes.Add(node);
         }
@@ -291,40 +304,12 @@ public class NodeService
     /// </summary>
     public async Task<List<string>> GetTaggedSubscriptionsAsync(Guid nodeId)
     {
-        var node = await _dbContext.Nodes.FindAsync(nodeId);
-        if (node is null) return new List<string>();
-
-        var effective = ComposeEffectiveTags(node.StaticTagsJson,
-            await _dbContext.NodeOverlayTags.Where(t => t.NodeId == nodeId).ToListAsync());
-        if (effective.Count == 0) return new List<string>();
-
-        var routes = await _dbContext.TaggedRoutes.ToListAsync();
-        var subscriptions = new List<string>();
-        foreach (var route in routes)
-        {
-            var selector = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(route.SelectorJson);
-            if (selector is null || selector.Count == 0) continue;
-            if (selector.All(req => effective.TryGetValue(req.Key, out var v) && v == req.Value))
-                subscriptions.Add($"tasks.tagged.{route.Hash}");
-        }
-        return subscriptions;
-    }
-
-    private static Dictionary<string, string> ComposeEffectiveTags(string? staticTagsJson, List<NodeOverlayTag> overlay)
-    {
-        var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var t in overlay) merged[t.Key] = t.Value;          // overlay first
-        if (!string.IsNullOrWhiteSpace(staticTagsJson))
-        {
-            try
-            {
-                var stat = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(staticTagsJson);
-                if (stat is not null)
-                    foreach (var (k, v) in stat) merged[k] = v;       // static wins (D6)
-            }
-            catch { /* malformed static tags — treat as empty */ }
-        }
-        return merged;
+        // P3-3: the superset match now runs through ITagMatchStrategy — a
+        // GIN-indexed `EffectiveTags @> SelectorJson` query in Postgres, or the
+        // in-memory LINQ reference for tests. Returns route hashes; we map to
+        // queue names here.
+        var hashes = await _tagMatcher.MatchRoutesForNodeAsync(nodeId, CancellationToken.None);
+        return hashes.Select(TaggedRouteHash.QueueNameForHash).ToList();
     }
 
     /// <summary>
@@ -377,7 +362,18 @@ public class NodeService
             }
         }
 
+        // Persist the overlay add/remove first so the recompute below reads the
+        // committed set (EF InMemory and provider semantics both reflect saved
+        // rows, not pending-tracked deltas, through a fresh query).
         await _dbContext.SaveChangesAsync();
+
+        // P3-3: resync the denormalized effective-tag projection from the new
+        // static + overlay state.
+        var node = await _dbContext.Nodes.FirstAsync(n => n.Id == nodeId);
+        var overlay = await _dbContext.NodeOverlayTags.Where(t => t.NodeId == nodeId).ToListAsync();
+        node.EffectiveTagsJson = Tags.EffectiveTags.ComposeJson(node.StaticTagsJson, overlay);
+        await _dbContext.SaveChangesAsync();
+
         return await GetOverlayTagsAsync(nodeId);
     }
 

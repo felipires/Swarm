@@ -20,19 +20,29 @@ public class TaskDispatchService
     private readonly ClusterDbContext _dbContext;
     private readonly ILogger<TaskDispatchService> _logger;
     private readonly DispatchValidator? _validator;
+    private readonly Tags.ITagMatchStrategy _tagMatcher;
 
     /// <summary>
     /// Two-arg constructor for tests that want to bypass the dispatch validator
-    /// (those tests assert routing/persistence behavior independently).
+    /// (those tests assert routing/persistence behavior independently). The tag
+    /// matcher defaults to the in-memory implementation over the same context.
     /// </summary>
     public TaskDispatchService(ClusterDbContext dbContext, ILogger<TaskDispatchService> logger)
-        : this(dbContext, logger, validator: null) { }
+        : this(dbContext, logger, validator: null, tagMatcher: null) { }
 
-    public TaskDispatchService(ClusterDbContext dbContext, ILogger<TaskDispatchService> logger, DispatchValidator? validator)
+    public TaskDispatchService(
+        ClusterDbContext dbContext,
+        ILogger<TaskDispatchService> logger,
+        DispatchValidator? validator,
+        Tags.ITagMatchStrategy? tagMatcher = null)
     {
         _dbContext = dbContext;
         _logger = logger;
         _validator = validator;
+        // P3-3: when not injected (unit tests on EF InMemory), fall back to the
+        // in-memory matcher — it shares the semantic contract with the Postgres
+        // one and reads the same effective-tag state.
+        _tagMatcher = tagMatcher ?? new Tags.InMemoryTagMatcher(dbContext);
     }
 
     /// <summary>
@@ -116,8 +126,10 @@ public class TaskDispatchService
         var queueName = TaggedRouteHash.QueueNameForHash(hash);
 
         // Eligibility precheck: at least one online Node must have a
-        // superset of the selector tags AND advertise the TaskType.
-        var eligible = await ResolveEligibleNodesAsync(tags, definition.TaskType);
+        // superset of the selector tags AND advertise the TaskType. P3-3 runs
+        // this through ITagMatchStrategy — GIN-indexed `EffectiveTags @>
+        // selector` in Postgres, in-memory LINQ in tests.
+        var eligible = await _tagMatcher.MatchEligibleNodesAsync(tags, definition.TaskType, CancellationToken.None);
         if (eligible.Count == 0)
             throw new InvalidOperationException(
                 $"No online Node satisfies tag selector {canonical} for TaskType '{definition.TaskType}'");
@@ -145,32 +157,6 @@ public class TaskDispatchService
             "Enqueued instance {InstanceId} on tagged shared queue {Queue} (selector {Selector}, {Count} eligible Node(s))",
             instance.Id, queueName, canonical, eligible.Count);
         return instance;
-    }
-
-    private async Task<List<Node>> ResolveEligibleNodesAsync(IReadOnlyDictionary<string, string> selector, string taskType)
-    {
-        // Pull online Nodes that advertise the TaskType, then filter by tag
-        // superset in-memory (StaticTagsJson is text/jsonb; doing the JSON
-        // containment in SQL would require provider-specific syntax — Phase-1
-        // simplification, see P3-3 follow-up).
-        var candidates = await _dbContext.Nodes
-            .Join(_dbContext.NodeCapabilities, n => n.Id, c => c.NodeId, (n, c) => new { Node = n, Capability = c })
-            .Where(x => x.Node.Status == Node.NodeStatus.Online
-                        && x.Capability.TaskType == taskType
-                        && x.Node.StaticTagsJson != null)
-            .Select(x => x.Node)
-            .Distinct()
-            .ToListAsync();
-
-        var eligible = new List<Node>();
-        foreach (var node in candidates)
-        {
-            var nodeTags = ParseTags(node.StaticTagsJson);
-            if (nodeTags is null) continue;
-            if (selector.All(req => nodeTags.TryGetValue(req.Key, out var v) && v == req.Value))
-                eligible.Add(node);
-        }
-        return eligible;
     }
 
     /// <summary>

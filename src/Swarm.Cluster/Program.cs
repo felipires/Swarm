@@ -47,6 +47,11 @@ builder.Services.AddSingleton<IConnection>(_ =>
     }.CreateConnection();
 });
 
+// P3-3: tag-containment matcher. The app runs on Postgres (UseNpgsql above),
+// so the GIN-indexed `@>` implementation is the production binding. The
+// in-memory LINQ matcher is the test/non-Postgres path, wired directly by tests.
+builder.Services.AddScoped<Swarm.Cluster.Services.Tags.ITagMatchStrategy,
+    Swarm.Cluster.Services.Tags.PostgresJsonbTagMatcher>();
 builder.Services.AddScoped<NodeService>();
 builder.Services.AddScoped<TaskDispatchService>();
 builder.Services.AddScoped<Swarm.Cluster.Validation.DispatchValidator>();
@@ -62,6 +67,12 @@ builder.Services.AddSingleton<Swarm.Cluster.Services.Pipelines.IStepAdvancer>(
     sp => sp.GetRequiredService<Swarm.Cluster.Services.Pipelines.InProcessStepAdvancer>());
 builder.Services.AddHostedService(
     sp => sp.GetRequiredService<Swarm.Cluster.Services.Pipelines.InProcessStepAdvancer>());
+
+// P1-3 cron-driven scheduler. ScheduleService is the scoped CRUD facade;
+// SchedulerService is the singleton sweep loop that fires due schedules
+// through PipelineService.StartRunAsync.
+builder.Services.AddScoped<Swarm.Cluster.Services.Pipelines.ScheduleService>();
+builder.Services.AddHostedService<Swarm.Cluster.Services.Pipelines.SchedulerService>();
 
 builder.Services.AddSingleton<LogConsumerService>();
 builder.Services.AddHostedService<HeartbeatBackgroundService>();

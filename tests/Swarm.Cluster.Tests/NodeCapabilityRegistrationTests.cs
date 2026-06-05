@@ -108,6 +108,7 @@ public class NodeCapabilityRegistrationTests
                 ["RabbitMQ:Password"] = "x",
             })
             .Build();
-        return new NodeService(db, NullLogger<NodeService>.Instance, config);
+        return new NodeService(db, NullLogger<NodeService>.Instance, config,
+            new Swarm.Cluster.Services.Tags.InMemoryTagMatcher(db));
     }
 }

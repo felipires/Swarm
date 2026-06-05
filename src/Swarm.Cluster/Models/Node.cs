@@ -16,6 +16,18 @@ public class Node
     /// </summary>
     public string? StaticTagsJson { get; set; }
 
+    /// <summary>
+    /// GIN-indexed jsonb projection of this Node's <em>effective</em> tags —
+    /// <c>static ∪ overlay</c>, static winning on key conflict (D6). This is a
+    /// query-optimization denormalization for tag-containment routing (P3-3);
+    /// <see cref="StaticTagsJson"/> + <see cref="NodeOverlayTag"/> remain the
+    /// source of truth. Kept in sync by the two — and only two — tag-write
+    /// sites: <c>NodeService.RegisterNodeAsync</c> (static) and
+    /// <c>NodeService.UpdateOverlayTagsAsync</c> (overlay), via
+    /// <see cref="Services.Tags.EffectiveTags"/>.
+    /// </summary>
+    public string? EffectiveTagsJson { get; set; }
+
     public enum NodeStatus
     {
         Online,

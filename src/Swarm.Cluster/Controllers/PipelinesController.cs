@@ -107,6 +107,144 @@ public class PipelinesController : ControllerBase
         var steps = await _service.GetRunStepsAsync(runId, cancellationToken);
         return Ok(steps.Select(PipelineStepInstanceResponse.From).ToList());
     }
+
+    // --- P1-3 schedules under the pipeline they belong to ---
+
+    [HttpPost("{id}/schedules")]
+    public async Task<ActionResult<ScheduleResponse>> CreateSchedule(
+        Guid id,
+        [FromBody] CreateScheduleRequest req,
+        [FromServices] ScheduleService schedules,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var runtimeParamsJson = req.RuntimeParams is { ValueKind: System.Text.Json.JsonValueKind.Object }
+                ? req.RuntimeParams.Value.GetRawText()
+                : null;
+            var schedule = await schedules.CreateAsync(
+                id,
+                req.CronExpression,
+                req.TimeZoneId ?? "UTC",
+                req.Enabled ?? true,
+                runtimeParamsJson,
+                cancellationToken);
+            return CreatedAtAction(nameof(GetSchedule), new { scheduleId = schedule.Id }, ScheduleResponse.From(schedule));
+        }
+        catch (CronScheduleException ex)
+        {
+            return BadRequest(new ApiError(ex.Code, ex.Message));
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new ApiError("PIPELINE_NOT_FOUND", $"Pipeline {id} not found"));
+        }
+    }
+
+    [HttpGet("{id}/schedules")]
+    public async Task<ActionResult<List<ScheduleResponse>>> ListSchedules(
+        Guid id,
+        [FromServices] ScheduleService schedules,
+        CancellationToken cancellationToken)
+    {
+        var list = await schedules.ListForPipelineAsync(id, cancellationToken);
+        return Ok(list.Select(ScheduleResponse.From).ToList());
+    }
+
+    [HttpGet("schedules/{scheduleId}")]
+    public async Task<ActionResult<ScheduleResponse>> GetSchedule(
+        Guid scheduleId,
+        [FromServices] ScheduleService schedules,
+        CancellationToken cancellationToken)
+    {
+        var schedule = await schedules.GetAsync(scheduleId, cancellationToken);
+        if (schedule is null)
+            return NotFound(new ApiError("SCHEDULE_NOT_FOUND", $"Schedule {scheduleId} not found"));
+        return Ok(ScheduleResponse.From(schedule));
+    }
+
+    [HttpPatch("schedules/{scheduleId}")]
+    public async Task<ActionResult<ScheduleResponse>> UpdateSchedule(
+        Guid scheduleId,
+        [FromBody] UpdateScheduleRequest req,
+        [FromServices] ScheduleService schedules,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var runtimeParamsJson = req.RuntimeParams is { ValueKind: System.Text.Json.JsonValueKind.Object }
+                ? req.RuntimeParams.Value.GetRawText()
+                : null;
+            var schedule = await schedules.UpdateAsync(
+                scheduleId, req.CronExpression, req.TimeZoneId, req.Enabled, runtimeParamsJson, cancellationToken);
+            return Ok(ScheduleResponse.From(schedule));
+        }
+        catch (CronScheduleException ex)
+        {
+            return BadRequest(new ApiError(ex.Code, ex.Message));
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new ApiError("SCHEDULE_NOT_FOUND", $"Schedule {scheduleId} not found"));
+        }
+    }
+
+    [HttpDelete("schedules/{scheduleId}")]
+    public async Task<ActionResult> DeleteSchedule(
+        Guid scheduleId,
+        [FromServices] ScheduleService schedules,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await schedules.DeleteAsync(scheduleId, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new ApiError("SCHEDULE_NOT_FOUND", $"Schedule {scheduleId} not found"));
+        }
+    }
+}
+
+public record CreateScheduleRequest(
+    string CronExpression,
+    string? TimeZoneId = null,
+    bool? Enabled = null,
+    System.Text.Json.JsonElement? RuntimeParams = null);
+
+public record UpdateScheduleRequest(
+    string? CronExpression = null,
+    string? TimeZoneId = null,
+    bool? Enabled = null,
+    System.Text.Json.JsonElement? RuntimeParams = null);
+
+public class ScheduleResponse
+{
+    public Guid Id { get; init; }
+    public Guid PipelineId { get; init; }
+    public string CronExpression { get; init; } = null!;
+    public string TimeZoneId { get; init; } = null!;
+    public bool Enabled { get; init; }
+    public DateTime? LastFiredAt { get; init; }
+    public DateTime? NextFireAt { get; init; }
+    public string? RuntimeParamsJson { get; init; }
+    public DateTime CreatedAt { get; init; }
+    public DateTime UpdatedAt { get; init; }
+
+    public static ScheduleResponse From(Schedule s) => new()
+    {
+        Id = s.Id,
+        PipelineId = s.PipelineId,
+        CronExpression = s.CronExpression,
+        TimeZoneId = s.TimeZoneId,
+        Enabled = s.Enabled,
+        LastFiredAt = s.LastFiredAt,
+        NextFireAt = s.NextFireAt,
+        RuntimeParamsJson = s.RuntimeParamsJson,
+        CreatedAt = s.CreatedAt,
+        UpdatedAt = s.UpdatedAt,
+    };
 }
 
 public record CreatePipelineRequest(

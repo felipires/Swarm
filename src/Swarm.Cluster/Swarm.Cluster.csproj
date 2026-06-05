@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Cronos" Version="0.8.4" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.76.0" />
     <PackageReference Include="JsonSchema.Net" Version="7.0.4" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.0" />

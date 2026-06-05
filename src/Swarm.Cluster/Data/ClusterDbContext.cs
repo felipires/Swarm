@@ -18,6 +18,7 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
     public DbSet<PipelineStep> PipelineSteps { get; set; } = null!;
     public DbSet<PipelineRun> PipelineRuns { get; set; } = null!;
     public DbSet<PipelineStepInstance> PipelineStepInstances { get; set; } = null!;
+    public DbSet<Schedule> Schedules { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,8 +31,12 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
             entity.Property(e => e.Status).IsRequired();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.Property(e => e.EffectiveTagsJson).HasColumnType("jsonb");
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.LastHeartbeatAt);
+            // P3-3: GIN index backs the `EffectiveTags @> selector` containment
+            // query used by tagged dispatch + tagged-subscription resolution.
+            entity.HasIndex(e => e.EffectiveTagsJson).HasMethod("gin");
         });
 
         modelBuilder.Entity<Log>(entity =>
@@ -195,6 +200,25 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.HasOne<PipelineRun>()
                   .WithMany()
                   .HasForeignKey(e => e.PipelineRunId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Schedule>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.CronExpression).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.TimeZoneId).IsRequired().HasMaxLength(64).HasDefaultValue("UTC");
+            entity.Property(e => e.Enabled).IsRequired().HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()").IsRequired();
+            // Sweep-query covering index: only Enabled rows are candidates,
+            // ordered by NextFireAt.
+            entity.HasIndex(e => new { e.Enabled, e.NextFireAt });
+            entity.HasIndex(e => e.PipelineId);
+            entity.HasOne<Pipeline>()
+                  .WithMany()
+                  .HasForeignKey(e => e.PipelineId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
     }

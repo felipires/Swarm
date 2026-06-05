@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Swarm.Cluster.Data;
@@ -11,9 +12,11 @@ using Swarm.Cluster.Data;
 namespace Swarm.Cluster.Migrations
 {
     [DbContext(typeof(ClusterDbContext))]
-    partial class ClusterDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260605105058_P1_3_Schedules")]
+    partial class P1_3_Schedules
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -81,9 +84,6 @@ namespace Swarm.Cluster.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now()");
 
-                    b.Property<string>("EffectiveTagsJson")
-                        .HasColumnType("jsonb");
-
                     b.Property<DateTime>("LastHeartbeatAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -99,10 +99,6 @@ namespace Swarm.Cluster.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("EffectiveTagsJson");
-
-                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("EffectiveTagsJson"), "gin");
 
                     b.HasIndex("LastHeartbeatAt");
 
