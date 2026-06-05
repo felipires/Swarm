@@ -12,8 +12,9 @@ public record PagedResult<T>(List<T> Items, int Total, int Page, int PageSize);
 /// </summary>
 public class PageRequest
 {
-    private const int DefaultPageSize = 50;
-    private const int MaxPageSize = 200;
+    // Shared with CursorRequest so offset and cursor paths agree on the window.
+    public const int DefaultPageSize = 50;
+    public const int MaxPageSize = 200;
 
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = DefaultPageSize;

@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy to appsettings.Development.json (gitignored) and fill in real local values, OR set the equivalent environment variables. Keys use the ASP.NET '__' separator when supplied as env vars (e.g. ConnectionStrings__DefaultConnection, RabbitMQ__Password).",
+  "ConnectionStrings": {
+    "DefaultConnection": "Host=localhost;Port=5432;Database=swarm;Username=postgres;Password=CHANGE_ME"
+  },
+  "RabbitMQ": {
+    "Hostname": "localhost",
+    "Port": 5672,
+    "Username": "guest",
+    "Password": "CHANGE_ME",
+    "VirtualHost": "/"
+  }
+}

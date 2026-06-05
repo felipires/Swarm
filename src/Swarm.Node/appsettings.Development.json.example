@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy to appsettings.Development.json (gitignored) and fill in real local values, OR set the equivalent environment variables. ApiKey identifies this Node to the Cluster and must be set (empty in the committed default). RabbitMQ creds are normally received from the Cluster at registration; the values here are only the pre-registration fallback.",
+  "ClusterUrl": "http://localhost:5000",
+  "ApiKey": "CHANGE_ME",
+  "RabbitMQ": {
+    "Hostname": "localhost",
+    "Port": 5672,
+    "Username": "guest",
+    "Password": "CHANGE_ME",
+    "VirtualHost": "/"
+  }
+}

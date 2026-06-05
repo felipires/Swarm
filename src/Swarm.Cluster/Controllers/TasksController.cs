@@ -119,10 +119,24 @@ public class TasksController : ControllerBase
         return Ok(instances.Select(TaskInstanceResponse.From));
     }
 
-    /// <summary>Get instances for a task definition (paginated).</summary>
+    /// <summary>
+    /// Get instances for a task definition. Two pagination modes share this
+    /// route (P3-1): the default offset mode (<c>?page=&amp;pageSize=</c>,
+    /// returns a total count) and an opt-in keyset/cursor mode
+    /// (<c>?cursor=true&amp;after=&amp;limit=</c>) for stable deep paging on this
+    /// high-frequency endpoint. Cursor mode engages when <c>cursor=true</c> or an
+    /// <c>after</c> token is supplied; otherwise the offset path is unchanged.
+    /// </summary>
     [HttpGet("{id}/instances")]
-    public async Task<ActionResult<PagedResult<TaskInstanceResponse>>> GetInstances(Guid id, [FromQuery] PageRequest page)
+    public async Task<ActionResult> GetInstances(
+        Guid id,
+        [FromQuery] PageRequest page,
+        [FromQuery] CursorRequest cursor,
+        [FromQuery] bool useCursor = false)
     {
+        if (useCursor || !string.IsNullOrEmpty(cursor.After))
+            return await GetInstancesByCursorAsync(id, cursor);
+
         var baseQuery = _db.TaskInstances
             .Where(i => i.TaskDefinitionId == id)
             .OrderByDescending(i => i.CreatedAt);
@@ -135,6 +149,39 @@ public class TasksController : ControllerBase
         return Ok(new PagedResult<TaskInstanceResponse>(
             instances.Select(TaskInstanceResponse.From).ToList(),
             total, page.NormalizedPage, page.NormalizedPageSize));
+    }
+
+    private async Task<ActionResult> GetInstancesByCursorAsync(Guid id, CursorRequest cursor)
+    {
+        var query = _db.TaskInstances.Where(i => i.TaskDefinitionId == id);
+
+        if (cursor.After is not null)
+        {
+            if (!Cursor.TryDecode(cursor.After, out var key))
+                return BadRequest(new ApiError("INVALID_CURSOR", "The 'after' cursor is malformed"));
+            // Keyset boundary: strictly older than the cursor under the
+            // (CreatedAt DESC, Id DESC) ordering. Expanded form (rather than a
+            // tuple comparison) for reliable provider translation.
+            query = query.Where(i =>
+                i.CreatedAt < key.CreatedAt
+                || (i.CreatedAt == key.CreatedAt && i.Id.CompareTo(key.Id) < 0));
+        }
+
+        var limit = cursor.NormalizedLimit;
+        var rows = await query
+            .OrderByDescending(i => i.CreatedAt)
+            .ThenByDescending(i => i.Id)
+            .Take(limit + 1)   // one extra to detect HasMore
+            .ToListAsync();
+
+        var hasMore = rows.Count > limit;
+        var page = hasMore ? rows.Take(limit).ToList() : rows;
+        var nextCursor = hasMore && page.Count > 0
+            ? Cursor.Encode(new Cursor.Key(page[^1].CreatedAt, page[^1].Id))
+            : null;
+
+        return Ok(new CursorPagedResult<TaskInstanceResponse>(
+            page.Select(TaskInstanceResponse.From).ToList(), nextCursor, hasMore));
     }
 
     /// <summary>Get a single task instance by ID.</summary>

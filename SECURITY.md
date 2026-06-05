@@ -45,8 +45,9 @@ If deploying Swarm in a shared/multi-tenant environment, be aware of the followi
   and overlay tags (P2-5).
 - **Task Config Security**: Task-level secrets are stored in Node-local encrypted stores
   (Tier 2) with AES-256-GCM and never sent to Cluster (P1-5a).
-- **Trust Model**: Currently no mTLS or Node-to-Cluster auth. See P4-3 for trust model
-  documentation.
+- **Trust Model**: Currently no mTLS or Node-to-Cluster auth. The full threat model
+  — what is trusted implicitly, the concrete threats, and the mitigation options
+  deferred to P4-1 — is documented in [docs/trust-model.md](docs/trust-model.md).
 
 ### Known Limitations (Pre-P4)
 
