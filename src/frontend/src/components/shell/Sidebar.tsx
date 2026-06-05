@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { NavLink } from "react-router-dom";
 import type { NavRoute } from "../../types/navigation";
 import { PRIMARY_NAV, SETTINGS_NAV } from "../../types/navigation";
 import {
@@ -6,24 +7,24 @@ import {
   IconObservability,
   IconOverview,
   IconSettings,
+  IconTasks,
   IconWorkflows,
 } from "./icons";
 
 const ICONS = {
   overview: IconOverview,
   workflows: IconWorkflows,
+  tasks: IconTasks,
   observability: IconObservability,
   settings: IconSettings,
 } as const;
 
 interface SidebarProps {
-  active: NavRoute;
   collapsed: boolean;
-  onNavigate: (route: NavRoute) => void;
   onToggleCollapse: () => void;
 }
 
-export function Sidebar({ active, collapsed, onNavigate, onToggleCollapse }: SidebarProps) {
+export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
   const navRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -31,22 +32,22 @@ export function Sidebar({ active, collapsed, onNavigate, onToggleCollapse }: Sid
     if (!nav) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const buttons = Array.from(nav.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
-      const index = buttons.findIndex((b) => b === document.activeElement);
+      const items = Array.from(nav.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+      const index = items.findIndex((b) => b === document.activeElement);
       if (index === -1) return;
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        buttons[(index + 1) % buttons.length]?.focus();
+        items[(index + 1) % items.length]?.focus();
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        buttons[(index - 1 + buttons.length) % buttons.length]?.focus();
+        items[(index - 1 + items.length) % items.length]?.focus();
       } else if (e.key === "Home") {
         e.preventDefault();
-        buttons[0]?.focus();
+        items[0]?.focus();
       } else if (e.key === "End") {
         e.preventDefault();
-        buttons[buttons.length - 1]?.focus();
+        items[items.length - 1]?.focus();
       }
     };
 
@@ -54,37 +55,42 @@ export function Sidebar({ active, collapsed, onNavigate, onToggleCollapse }: Sid
     return () => nav.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const renderItem = (id: NavRoute, label: string) => {
+  const renderItem = (id: NavRoute, label: string, path: string) => {
     const Icon = ICONS[id];
-    const isActive = active === id;
 
     return (
-      <button
+      <NavLink
         key={id}
-        type="button"
+        to={path}
         role="menuitem"
-        aria-current={isActive ? "page" : undefined}
         title={collapsed ? label : undefined}
-        onClick={() => onNavigate(id)}
-        className={[
-          "group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors",
-          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)]",
-          isActive
-            ? "bg-[var(--swarm-primary-subtle)] text-[var(--swarm-ink)]"
-            : "text-[var(--swarm-muted)] hover:bg-[var(--swarm-surface-raised)] hover:text-[var(--swarm-ink)]",
-        ].join(" ")}
+        className={({ isActive }) =>
+          [
+            "group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors",
+            "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)]",
+            isActive
+              ? "bg-[var(--swarm-primary-subtle)] text-[var(--swarm-ink)]"
+              : "text-[var(--swarm-muted)] hover:bg-[var(--swarm-surface-raised)] hover:text-[var(--swarm-ink)]",
+          ].join(" ")
+        }
         style={{ transitionDuration: "var(--swarm-duration)", transitionTimingFunction: "var(--swarm-ease-out)" }}
       >
-        <span
-          className={[
-            "flex shrink-0 items-center justify-center rounded-md p-1",
-            isActive ? "text-[var(--swarm-primary)]" : "text-[var(--swarm-muted)] group-hover:text-[var(--swarm-ink)]",
-          ].join(" ")}
-        >
-          <Icon />
-        </span>
-        {!collapsed && <span className="truncate">{label}</span>}
-      </button>
+        {({ isActive }) => (
+          <>
+            <span
+              className={[
+                "flex shrink-0 items-center justify-center rounded-md p-1",
+                isActive
+                  ? "text-[var(--swarm-primary)]"
+                  : "text-[var(--swarm-muted)] group-hover:text-[var(--swarm-ink)]",
+              ].join(" ")}
+            >
+              <Icon />
+            </span>
+            {!collapsed && <span className="truncate">{label}</span>}
+          </>
+        )}
+      </NavLink>
     );
   };
 
@@ -116,12 +122,12 @@ export function Sidebar({ active, collapsed, onNavigate, onToggleCollapse }: Sid
       </div>
 
       <nav ref={navRef} aria-label="Primary" role="menu" className="flex flex-1 flex-col gap-1 px-2 py-3">
-        {PRIMARY_NAV.map((item) => renderItem(item.id, item.label))}
+        {PRIMARY_NAV.map((item) => renderItem(item.id, item.label, item.path))}
       </nav>
 
       <div className="mt-auto border-t border-[var(--swarm-border)] px-2 py-3">
         <nav aria-label="Settings" role="menu">
-          {renderItem(SETTINGS_NAV.id, SETTINGS_NAV.label)}
+          {renderItem(SETTINGS_NAV.id, SETTINGS_NAV.label, SETTINGS_NAV.path)}
         </nav>
         <button
           type="button"

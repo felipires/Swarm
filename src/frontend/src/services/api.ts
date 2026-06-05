@@ -1,17 +1,43 @@
 import axios, { AxiosInstance } from "axios";
-import type { Node, TaskDefinition, TaskInstance } from "../store/store";
-
-const BASE_URL =
-  (import.meta as any).env.VITE_API_URL || "http://localhost:5001/api";
+import { loadSettings, type ApiSettings } from "./settings";
+import type {
+  CursorPage,
+  Node,
+  Pipeline,
+  PipelineRun,
+  Schedule,
+  TaskDefinition,
+  TaskInstance,
+} from "../store/store";
 
 class ApiClient {
   private client: AxiosInstance;
 
   constructor() {
-    this.client = axios.create({
-      baseURL: BASE_URL,
-      headers: { "Content-Type": "application/json" },
-    });
+    const settings = loadSettings();
+    this.client = axios.create({ baseURL: settings.baseUrl });
+    this.applySettings(settings);
+  }
+
+  /** Updates the live axios instance so settings changes take effect without a
+   *  page reload. */
+  applySettings(settings: ApiSettings): void {
+    this.client.defaults.baseURL = settings.baseUrl;
+    this.client.defaults.headers.common["Content-Type"] = "application/json";
+    if (settings.apiKey) {
+      this.client.defaults.headers.common["X-API-Key"] = settings.apiKey;
+    } else {
+      delete this.client.defaults.headers.common["X-API-Key"];
+    }
+  }
+
+  /** Pings the server's /health (sibling of the /api base) with the given
+   *  settings without mutating the live client. Returns true on { status: "ok" }. */
+  async checkHealth(settings: ApiSettings): Promise<boolean> {
+    const healthUrl = settings.baseUrl.replace(/\/api\/?$/, "") + "/health";
+    const headers = settings.apiKey ? { "X-API-Key": settings.apiKey } : undefined;
+    const response = await axios.get(healthUrl, { headers, timeout: 5000 });
+    return response.data?.status === "ok";
   }
 
   // Nodes
@@ -75,11 +101,44 @@ class ApiClient {
   // Instances
   async getInstances(taskId: string): Promise<TaskInstance[]> {
     const response = await this.client.get(`/tasks/${taskId}/instances`);
-    return response.data;
+    return response.data.items;
   }
 
   async getInstance(instanceId: string): Promise<TaskInstance> {
     const response = await this.client.get(`/tasks/instances/${instanceId}`);
+    return response.data;
+  }
+
+  // Pipelines
+  async getPipelines(): Promise<Pipeline[]> {
+    const response = await this.client.get("/pipelines");
+    return response.data.items;
+  }
+
+  async getPipelineRuns(
+    pipelineId: string,
+    after?: string,
+  ): Promise<CursorPage<PipelineRun>> {
+    const response = await this.client.get(`/pipelines/${pipelineId}/runs`, {
+      params: after ? { after } : {},
+    });
+    return response.data;
+  }
+
+  async runPipeline(
+    pipelineId: string,
+    runtimeParams?: Record<string, string>,
+  ): Promise<PipelineRun> {
+    const response = await this.client.post(`/pipelines/${pipelineId}/run`, {
+      runtimeParams,
+    });
+    return response.data;
+  }
+
+  async getSchedules(pipelineId: string): Promise<Schedule[]> {
+    const response = await this.client.get(
+      `/pipelines/${pipelineId}/schedules`,
+    );
     return response.data;
   }
 

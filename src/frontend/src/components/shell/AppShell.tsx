@@ -1,14 +1,25 @@
 import { useEffect, useState } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useClusterPulse } from "../../hooks/useClusterPulse";
 import type { NavRoute } from "../../types/navigation";
-import { PlaceholderView } from "./PlaceholderView";
+import { PRIMARY_NAV, SETTINGS_NAV } from "../../types/navigation";
+import type { ShellContext } from "./RouteView";
 import { Sidebar } from "./Sidebar";
 import { StatusStrip } from "./StatusStrip";
 
 const LG_BREAKPOINT = 1024;
+const KNOWN_ROUTES = [...PRIMARY_NAV, SETTINGS_NAV];
+
+function routeFromPath(pathname: string): NavRoute {
+  const match = KNOWN_ROUTES.find((item) => pathname.startsWith(item.path));
+  return match?.id ?? "overview";
+}
 
 export function AppShell() {
-  const [route, setRoute] = useState<NavRoute>("overview");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const route = routeFromPath(location.pathname);
+
   const [collapsed, setCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const pulse = useClusterPulse();
@@ -21,12 +32,12 @@ export function AppShell() {
     return () => mq.removeEventListener("change", apply);
   }, []);
 
+  const context: ShellContext = { pulse };
+
   return (
     <div className="flex h-screen min-h-0 bg-[var(--swarm-bg)] text-[var(--swarm-ink)]">
       <Sidebar
-        active={route}
         collapsed={collapsed}
-        onNavigate={setRoute}
         onToggleCollapse={() => setCollapsed((c) => !c)}
       />
 
@@ -38,7 +49,7 @@ export function AppShell() {
           totalNodes={pulse.totalNodes}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          onAlertsClick={() => setRoute("observability")}
+          onAlertsClick={() => navigate("/observability")}
         />
 
         <main
@@ -47,7 +58,7 @@ export function AppShell() {
           role="main"
           aria-label={route}
         >
-          <PlaceholderView route={route} connection={pulse.connection} />
+          <Outlet context={context} />
         </main>
       </div>
     </div>

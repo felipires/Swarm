@@ -1,11 +1,12 @@
-import { create } from "zustand";
-
 export interface Node {
   id: string;
   name: string;
   status: "Online" | "Offline";
   lastHeartbeatAt: string;
   createdAt: string;
+  // Planned backend enrichment — render if present, ignore if absent.
+  effectiveTags?: Record<string, string>;
+  capabilities?: string[];
 }
 
 export interface TaskDefinition {
@@ -29,37 +30,68 @@ export interface TaskInstance {
   completedAt?: string;
 }
 
-interface StoreState {
-  nodes: Node[];
-  tasks: TaskDefinition[];
-  instances: TaskInstance[];
-  selectedNode: Node | null;
-  selectedTask: TaskDefinition | null;
+export type DispatchStrategy = "AnyOnline" | "SpecificNode" | "Tagged";
+export type FailurePolicy = "Fail" | "Continue" | "Retry";
 
-  setNodes: (nodes: Node[]) => void;
-  setTasks: (tasks: TaskDefinition[]) => void;
-  setInstances: (instances: TaskInstance[]) => void;
-  upsertInstance: (instance: TaskInstance) => void;
-  setSelectedNode: (node: Node | null) => void;
-  setSelectedTask: (task: TaskDefinition | null) => void;
+export interface PipelineStep {
+  id: string;
+  name: string;
+  order: number;
+  dependsOn: string[];
+  strategy: DispatchStrategy;
+  targetNodeId?: string;
+  targetTags?: Record<string, string>;
+  failurePolicy: FailurePolicy;
+  taskDefinitionId: string;
 }
 
-export const useStore = create<StoreState>((set) => ({
-  nodes: [],
-  tasks: [],
-  instances: [],
-  selectedNode: null,
-  selectedTask: null,
+export interface Pipeline {
+  id: string;
+  name: string;
+  description?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  steps: PipelineStep[];
+}
 
-  setNodes: (nodes) => set({ nodes }),
-  setTasks: (tasks) => set({ tasks }),
-  setInstances: (instances) => set({ instances }),
-  upsertInstance: (instance) =>
-    set((s) => ({
-      instances: s.instances.some((i) => i.id === instance.id)
-        ? s.instances.map((i) => (i.id === instance.id ? instance : i))
-        : [...s.instances, instance],
-    })),
-  setSelectedNode: (node) => set({ selectedNode: node }),
-  setSelectedTask: (task) => set({ selectedTask: task }),
-}));
+export type PipelineRunStatus = "Running" | "Completed" | "Failed" | "Cancelled";
+
+export interface PipelineRun {
+  id: string;
+  pipelineId: string;
+  status: PipelineRunStatus;
+  startedAt: string;
+  completedAt?: string;
+  errorMessage?: string;
+}
+
+export interface Schedule {
+  id: string;
+  pipelineId: string;
+  cronExpression: string;
+  timeZoneId: string;
+  enabled: boolean;
+  lastFiredAt?: string;
+  nextFireAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CursorPage<T> {
+  items: T[];
+  hasMore: boolean;
+  nextCursor?: string;
+}
+
+export type LogLevel = "Debug" | "Information" | "Warning" | "Error" | "Critical";
+
+export interface LogEntry {
+  id: string;
+  nodeId: string;
+  level: LogLevel;
+  messageTemplate: string;
+  renderedMessage?: string;
+  timestamp: string;
+  createdAt: string;
+}

@@ -93,6 +93,34 @@ export function IconNodes(props: IconProps) {
   );
 }
 
+export function IconTasks(props: IconProps) {
+  return (
+    <svg {...defaults} {...props}>
+      <path d="M3 4.5l1.5 1.5L7 3.5" />
+      <path d="M3 11l1.5 1.5L7 10" />
+      <path d="M10 5h5M10 11h5" />
+    </svg>
+  );
+}
+
+export function IconRefresh(props: IconProps) {
+  return (
+    <svg {...defaults} {...props}>
+      <path d="M14.5 5.5a6 6 0 10.9 5" />
+      <path d="M14.5 2.5v3h-3" />
+    </svg>
+  );
+}
+
+export function IconTrash(props: IconProps) {
+  return (
+    <svg {...defaults} {...props}>
+      <path d="M3.5 5h11M7 5V3.5h4V5M5 5l.6 9a1 1 0 001 1h4.8a1 1 0 001-1L13 5" />
+      <path d="M7.5 7.5v5M10.5 7.5v5" />
+    </svg>
+  );
+}
+
 export function IconChevron(props: IconProps & { direction?: "left" | "right" }) {
   const { direction = "left", ...rest } = props;
   return (
