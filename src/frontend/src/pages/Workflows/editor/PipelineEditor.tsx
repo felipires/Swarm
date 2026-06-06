@@ -1,7 +1,6 @@
 import {
   addEdge,
   Background,
-  Controls,
   MarkerType,
   ReactFlow,
   ReactFlowProvider,

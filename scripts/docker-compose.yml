@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -51,12 +49,24 @@ services:
     networks:
       - swarm-network
 
+  migrate:
+    build:
+      context: ./../
+      dockerfile: src/Swarm.Cluster/Dockerfile.migrations
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-swarm};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - swarm-network
+    restart: "no"
+
   cluster:
     build:
       context: ./../
       dockerfile: src/Swarm.Cluster/Dockerfile
     environment:
-      # DB name aligns with the postgres service's POSTGRES_DB (default: swarm).
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-swarm};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
       Redis__Connection: "redis:6379"
       RabbitMQ__Hostname: "rabbitmq"
@@ -67,12 +77,14 @@ services:
     ports:
       - "5000:5000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
+        condition: service_completed_successfully
     networks:
       - swarm-network
     volumes:
@@ -85,20 +97,16 @@ services:
     environment:
       ClusterUrl: "http://cluster:5000"
       RabbitMQ__Hostname: "rabbitmq"
-      # Node identity to the Cluster. Committed appsettings ships this blank;
-      # supply a real value here (or via .env) per deployment.
       ApiKey: ${NODE_API_KEY:-node-dev-key}
     depends_on:
-      rabbitmq:
-        condition: service_healthy
       cluster:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
     networks:
       - swarm-network
     volumes:
       - ../src/Swarm.Node/logs:/app/logs
-    deploy:
-      replicas: 1 # Start 1 node instance
 
   frontend:
     build:
