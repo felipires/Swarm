@@ -1,0 +1,84 @@
+---
+title: Production Deployment
+---
+import { Callout } from 'fumadocs-ui/components/callout';
+
+
+# Production Deployment
+
+<Callout type="warn" title="Authentication is not yet enforced">
+Swarm has no REST or gRPC authentication until P4-1 lands. Run on a **trusted private network** only. See [Security →](../security).
+</Callout>
+
+## Checklist
+
+- [ ] Override all credentials via environment variables (no committed secrets)
+- [ ] Postgres on a managed service or dedicated host with backups
+- [ ] RabbitMQ with a dedicated vhost and per-application user
+- [ ] Redis with persistence enabled (`appendonly yes`) or accept loss on restart
+- [ ] `SWARM_NODE_MACHINE_KEY` set and backed up on every Node
+- [ ] Cluster not exposed to untrusted networks until P4-1 auth lands
+- [ ] Log retention configured (`Logging:RetentionDays`)
+
+## Cluster environment
+
+```bash
+ConnectionStrings__DefaultConnection="Host=db.internal;Database=swarm;Username=swarm;Password=<secret>"
+RabbitMQ__Hostname=mq.internal
+RabbitMQ__Username=swarm
+RabbitMQ__Password=<secret>
+Redis__Connection=redis.internal:6379
+ASPNETCORE_ENVIRONMENT=Production
+```
+
+## Node environment
+
+```bash
+ApiKey=<production-node-key>
+ClusterUrl=http://cluster.internal:5000
+SWARM_NODE_MACHINE_KEY=<stable-32-char-key>
+```
+
+## Migrations in production
+
+Always run migrations before deploying a new Cluster version:
+
+```bash
+dotnet ef database update --project src/Swarm.Cluster \
+  --connection "Host=db.internal;Database=swarm;Username=swarm;Password=<secret>"
+```
+
+Or use the migration bundle approach for zero-dependency migration execution:
+
+```bash
+dotnet ef migrations bundle --project src/Swarm.Cluster -o migrate
+./migrate --connection "<connection-string>"
+```
+
+## Health checks
+
+Configure your load balancer or orchestrator to hit:
+
+```
+GET http://cluster:5001/health
+```
+
+Returns `200 {"status":"ok"}` when the Cluster is ready.
+
+## RabbitMQ queue pre-declaration
+
+The Cluster declares all queues at startup. If you restart RabbitMQ without Swarm running, the queue topology is recreated on next Cluster startup.
+
+One queue requires manual deletion when upgrading from before the DLX feature was added:
+
+```bash
+rabbitmqctl delete_queue task-results
+```
+
+The Cluster will recreate it with the dead-letter exchange binding.
+
+## Observability
+
+- **Logs:** Structured JSON via Serilog. In production, configure a Serilog sink (Seq, Elasticsearch, CloudWatch) by adding it to the `Serilog` section of `appsettings.json`.
+- **Node metrics:** Available at `GET /api/nodes` (`latestMetrics` field) and `GET /api/nodes/{id}/metrics` (history). The dashboard visualizes these in real time.
+- **RabbitMQ:** The management UI at `:15672` shows queue depths, consumer counts, and message rates.

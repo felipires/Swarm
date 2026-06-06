@@ -1,0 +1,99 @@
+---
+title: Logs
+---
+import { Callout } from 'fumadocs-ui/components/callout';
+
+
+# Logs
+
+Node processes emit structured Serilog logs routed via RabbitMQ to the Cluster. The Cluster buffers the most recent ~1000 entries per node and fans them out to SSE subscribers.
+
+## Stream logs (SSE)
+
+```
+GET /api/logs/stream/{nodeId}
+```
+
+Opens a Server-Sent Events stream for a specific node. On connect, the server immediately replays the buffered log history, then delivers new events as they arrive.
+
+### Connecting from a browser
+
+```ts
+const source = new EventSource(`/api/logs/stream/${nodeId}`);
+
+source.onmessage = (event) => {
+  const log = JSON.parse(event.data);
+  console.log(`[${log.level}] ${log.message}`);
+};
+
+source.onerror = () => {
+  // Connection dropped; reconnect logic here
+};
+```
+
+<Callout type="info" title="Vite proxy">
+In development, configure Vite to proxy `/api` to `http://localhost:5001` so relative URLs work correctly across the gRPC (5000) and REST (5001) ports.
+</Callout>
+
+### Event data shape
+
+```json
+{
+  "id": "h1i2j3k4-0001-0000-0000-000000000000",
+  "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
+  "level": "Information",
+  "message": "Task started: Ingest CSV on node worker-eu-1",
+  "timestamp": "2024-11-12T10:00:01.123Z",
+  "exception": null
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | uuid | Log entry ID |
+| `nodeId` | uuid | Originating node |
+| `level` | string | `Debug` \| `Information` \| `Warning` \| `Error` \| `Critical` |
+| `message` | string | Rendered log message |
+| `timestamp` | string | UTC timestamp from the Node |
+| `exception` | string? | Stack trace if an exception was attached |
+
+### Initial ping
+
+The server sends `: connected\n\n` immediately on connection so `EventSource.onopen` fires without waiting for the first log entry.
+
+---
+
+## Buffer status
+
+```
+GET /api/logs/buffer-status/{nodeId}
+```
+
+Returns the current in-memory log buffer size for a node.
+
+**Response `200`:**
+
+```json
+{
+  "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
+  "bufferSize": 342
+}
+```
+
+---
+
+## Log correlation with tasks
+
+Log entries do not carry a `taskInstanceId`. To correlate logs with a specific task instance:
+
+1. Get the instance's `nodeId`, `dispatchedAt`, and `completedAt`
+2. Open the SSE stream for that node
+3. Filter client-side by timestamp range (`dispatchedAt` → `completedAt`)
+
+On failure, `instance.errorMessage` contains the top-level failure reason. The full stack trace appears in the SSE stream if the Node attached an exception.
+
+---
+
+## Log retention
+
+The Cluster runs a `LogRetentionService` that purges log entries older than `Logging:RetentionDays` (default 30 days). Set `Logging:RetentionDays` to `0` to disable retention.

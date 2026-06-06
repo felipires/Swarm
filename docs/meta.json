@@ -1,0 +1,19 @@
+{
+  "title": "Swarm",
+  "pages": [
+    "intro",
+    "---Getting Started---",
+    "getting-started",
+    "---Concepts---",
+    "concepts",
+    "---Configuration---",
+    "configuration",
+    "---Deployment---",
+    "deployment",
+    "---Node SDK---",
+    "sdk",
+    "security",
+    "---API Reference---",
+    "api"
+  ]
+}

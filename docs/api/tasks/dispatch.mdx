@@ -1,0 +1,123 @@
+---
+title: Dispatch
+---
+import { Callout } from 'fumadocs-ui/components/callout';
+
+
+# Dispatch
+
+## Dispatch a single task
+
+```
+POST /api/tasks/{id}/dispatch
+```
+
+Creates a `TaskInstance` and routes it to one or more Nodes. All body fields are optional — omitting them uses the definition's defaults.
+
+**Request body:**
+
+```json
+{
+  "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
+  "strategy": "SpecificNode",
+  "targetTags": null,
+  "runtimeParams": {
+    "recipient": "ops@example.com",
+    "report_date": "2024-11-12"
+  }
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `nodeId` | uuid | Required when `strategy` is `SpecificNode` |
+| `strategy` | string | Overrides the definition's `defaultStrategy` |
+| `targetTags` | object | Used when `strategy` is `TaggedNodes` |
+| `runtimeParams` | object | Arbitrary JSON; resolves `{param:KEY}` in configJson |
+
+**Response `200`:** `TaskInstanceResponse`
+
+```json
+{
+  "id": "c1d2e3f4-0001-0000-0000-000000000000",
+  "taskDefinitionId": "b1c2d3e4-0001-0000-0000-000000000000",
+  "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
+  "status": "Dispatched",
+  "resultJson": null,
+  "errorMessage": null,
+  "createdAt": "2024-11-12T09:42:00.000Z",
+  "dispatchedAt": "2024-11-12T09:42:00.050Z",
+  "completedAt": null
+}
+```
+
+<Callout type="info">
+When `strategy` is `AnyOnlineNode`, `nodeId` is `null` until a Node claims the message.
+</Callout>
+
+**Error codes:**
+
+| Code | Meaning |
+|---|---|
+| `TASK_NOT_FOUND` | Task definition does not exist |
+| `NO_ELIGIBLE_NODES` | No online nodes match the routing criteria |
+| `NODE_NOT_FOUND` | `SpecificNode`: named node doesn't exist |
+| `NODE_OFFLINE` | `SpecificNode`: named node is Offline |
+| `SPECIFIC_NODE_REQUIRES_NODE_ID` | Strategy is `SpecificNode` but no `nodeId` provided |
+
+---
+
+## Dispatch to all nodes
+
+```
+POST /api/tasks/{id}/dispatch-all
+```
+
+Dispatches one instance to every currently online Node in a single atomic transaction. Useful for fleet-wide operations (cache invalidation, config broadcast).
+
+No request body required (uses definition defaults).
+
+**Response `200`:** `TaskInstanceResponse[]`
+
+```json
+[
+  {
+    "id": "c1d2e3f4-0002-0000-0000-000000000000",
+    "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
+    "status": "Dispatched"
+  },
+  {
+    "id": "c1d2e3f4-0003-0000-0000-000000000000",
+    "nodeId": "a3b4c5d6-0002-0000-0000-000000000000",
+    "status": "Dispatched"
+  }
+]
+```
+
+---
+
+## Examples
+
+```bash
+# Dispatch to a specific node
+curl -X POST http://localhost:5001/api/tasks/<taskId>/dispatch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "SpecificNode",
+    "nodeId": "<nodeId>",
+    "runtimeParams": {"table": "orders"}
+  }'
+
+# Dispatch to any online node
+curl -X POST http://localhost:5001/api/tasks/<taskId>/dispatch \
+  -H "Content-Type: application/json" \
+  -d '{"strategy": "AnyOnlineNode"}'
+
+# Dispatch to tagged nodes
+curl -X POST http://localhost:5001/api/tasks/<taskId>/dispatch \
+  -H "Content-Type: application/json" \
+  -d '{"strategy": "TaggedNodes", "targetTags": {"region": "eu", "role": "ingestor"}}'
+
+# Broadcast to all nodes
+curl -X POST http://localhost:5001/api/tasks/<taskId>/dispatch-all
+```

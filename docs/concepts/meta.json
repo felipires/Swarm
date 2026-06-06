@@ -1,0 +1,13 @@
+{
+  "title": "Concepts",
+  "pages": [
+    "architecture",
+    "nodes",
+    "tasks",
+    "pipelines",
+    "dispatch-strategies",
+    "tags",
+    "retry-policy",
+    "config-placeholders"
+  ]
+}

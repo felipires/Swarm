@@ -1,0 +1,70 @@
+---
+title: Plugin Loading
+---
+import { Callout } from 'fumadocs-ui/components/callout';
+
+
+# Plugin Loading
+
+The Node can load handler implementations from external DLL assemblies at startup without modifying or rebuilding the Node itself.
+
+## Configuring the plugin path
+
+Set `Swarm:PluginsPath` to a directory containing handler assemblies:
+
+```json
+{
+  "Swarm": {
+    "PluginsPath": "/opt/swarm/plugins"
+  }
+}
+```
+
+Or via environment variable:
+
+```bash
+Swarm__PluginsPath=/opt/swarm/plugins
+```
+
+## Plugin requirements
+
+A plugin assembly must:
+
+1. Target .NET 8
+2. Reference `Swarm.Node.Sdk`
+3. Contain one or more public classes that implement `ITaskHandler`
+4. Each handler class must have a **parameterless constructor**
+
+```csharp
+// MyPlugin/MyHandler.cs
+using Swarm.Sdk.Abstractions;
+
+public class MyCustomHandler : ITaskHandler
+{
+    public string TaskType => "my-handler@1";
+    public HandlerSchema Schema => new HandlerSchema { JsonSchema = "{}" };
+
+    public Task<TaskResult> HandleAsync(TaskContext context, CancellationToken ct)
+    {
+        return Task.FromResult(new TaskResult(true, ResultJson: "\"done\""));
+    }
+}
+```
+
+Build and drop the DLL into the plugins directory:
+
+```bash
+dotnet publish MyPlugin -c Release -o /opt/swarm/plugins
+```
+
+## What happens at startup
+
+The Node scans the plugins directory for `*.dll` files, loads each with `Assembly.LoadFrom`, and registers all discovered `ITaskHandler` types as singletons. Each loaded handler is reported to the Cluster at registration in the `capabilities` list.
+
+## Dependency injection limitation
+
+Plugin handlers must use a parameterless constructor — the DI container is not available during plugin discovery. If your handler needs services (e.g. `IHttpClientFactory`, a database client), construct them in the constructor using `new` or a static factory, rather than injecting via DI.
+
+<Callout type="warn" title="Trust model">
+`Assembly.LoadFrom` on an external path executes arbitrary code. Until the P4-3 trust model is resolved, only load plugins from trusted sources on trusted machines.
+</Callout>

@@ -1,0 +1,75 @@
+---
+title: Docker Compose
+---
+import { Callout } from 'fumadocs-ui/components/callout';
+
+
+# Docker Compose
+
+The compose file at `scripts/docker-compose.yml` is the canonical way to run the full Swarm stack locally.
+
+## Running the stack
+
+```bash
+docker compose -f scripts/docker-compose.yml up --build
+```
+
+Add `-d` to run detached. Rebuild a single service after a code change:
+
+```bash
+docker compose -f scripts/docker-compose.yml up --build cluster
+```
+
+## Stopping
+
+```bash
+docker compose -f scripts/docker-compose.yml down
+```
+
+To also remove volumes (wipes the database):
+
+```bash
+docker compose -f scripts/docker-compose.yml down -v
+```
+
+## Environment overrides
+
+Create a `.env` file next to `docker-compose.yml` (it is gitignored). The compose file reads these variables and applies defaults when they are absent:
+
+```dotenv
+# Postgres
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=swarm
+
+# RabbitMQ
+RABBITMQ_USER=guest
+RABBITMQ_PASSWORD=guest
+
+# Node authentication
+NODE_API_KEY=node-dev-key
+```
+
+<Callout type="warn">
+The defaults above are for local development only. Always override credentials in production via environment variables or a secrets manager.
+</Callout>
+
+## Scaling Nodes
+
+```bash
+docker compose -f scripts/docker-compose.yml up --scale node=3
+```
+
+Each Node process generates a unique ID on first start and persists it to its local SQLite database. Multiple Node containers will each register independently and appear as separate entries in `GET /api/nodes`.
+
+## Machine key for encrypted secrets
+
+When Nodes store encrypted env secrets (`POST /api/nodes/{id}/env`), the encryption key is derived from `SWARM_NODE_MACHINE_KEY`. Without this variable, a random key is generated on first start and written to `.machinekey` in the Node's database directory. If the container is rebuilt without preserving this file, previously encrypted secrets become unreadable.
+
+Add to your `.env`:
+
+```dotenv
+SWARM_NODE_MACHINE_KEY=your-stable-32-char-key-here
+```
+
+Back it up — it is equivalent to a database encryption key.

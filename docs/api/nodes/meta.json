@@ -1,0 +1,4 @@
+{
+  "title": "Nodes",
+  "pages": ["list", "get", "delete", "tags", "env", "metrics"]
+}

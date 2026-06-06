@@ -1,0 +1,59 @@
+---
+title: Security & Trust Model
+---
+import { Callout } from 'fumadocs-ui/components/callout';
+
+
+# Security & Trust Model
+
+<Callout type="error" title="Single-operator / trusted-network only">
+Swarm currently has no enforced authentication on any channel. Run it on a private trusted network. See safe-deployment guidance below.
+</Callout>
+
+This page records the current implicit trust surface and known threats. Authentication is a planned feature (roadmap P4-1, deferred per decision D7).
+
+## Current trust surface
+
+| What | Status |
+|---|---|
+| gRPC `api_key` field | Sent but **never validated**. Any value is accepted. |
+| Node identity | A bare GUID — no proof of possession. Anyone with a valid node ID can impersonate it. |
+| REST API auth | `UseAuthentication()` is in the pipeline but no handler is registered. **All endpoints are unauthenticated.** |
+| RabbitMQ credentials | Returned to every caller of `RegisterNode`. Single shared account for all queues. |
+| Transport encryption | No TLS on `:5000` (gRPC) or `:5001` (REST). `:5002` has TLS but no authentication on top. |
+
+## Concrete threats
+
+| # | Threat | Vector |
+|---|---|---|
+| T1 | **Node impersonation** | Heartbeat with a known `node_id` → control online status, drain env-secret ops, harvest tags |
+| T2 | **Capability inflation** | Register with fabricated handlers → become eligible for tasks you can't run |
+| T3 | **Task-result poisoning** | With broker creds, publish to `task-results` → mark instances Completed/Failed |
+| T4 | **False claims** | Publish to `task-claims` → bind shared-queue instances to an attacker node |
+| T5 | **Env-secret exfiltration** | Impersonate a heartbeat → receive `pending_env_ops` (plaintext delivery window) |
+| T6 | **Cross-node queue reads** | Subscribe to any `tasks.*` queue with shared broker creds |
+| T7 | **Broker blast radius** | One leaked registration response compromises all queues |
+| T8 | **Unauthorized control plane** | Unauthenticated REST → dispatch tasks, set secrets, trigger pipelines |
+
+## Partial protections in place
+
+- **Tier-2 env secrets** are AES-256-GCM encrypted at rest on the Node (P1-5a). The exposure in T5 is the delivery window only.
+- **Secret redaction** in logs (P4-2a) prevents env secrets from appearing in structured log output.
+
+## Mitigation options (for P4-1)
+
+| Option | Addresses |
+|---|---|
+| mTLS between Node and Cluster | T1, T2, T5, partial T8 |
+| Short-lived JWT at registration | T1, T5 |
+| Node allowlist + validated `api_key` | T1, T2 (entry control) |
+| Per-node RabbitMQ credentials/vhosts | T3, T4, T6, T7 |
+| REST authentication (API keys / OIDC) | T8 |
+| TLS on `:5000` / `:5001` | T5, eavesdropping |
+
+## Safe-deployment guidance (until P4-1)
+
+1. Run Cluster and Nodes on a **private network**. Do not expose `:5000`, `:5001`, `:5002`, or `:5672` to untrusted clients.
+2. Treat anyone with network access to the Cluster as a full operator.
+3. Override all system-plane credentials via environment variables. Rotate the shared RabbitMQ account regularly.
+4. Set `SWARM_NODE_MACHINE_KEY` per Node and back it up — losing it makes previously encrypted secrets unrecoverable.

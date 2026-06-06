@@ -1,0 +1,4 @@
+{
+  "title": "Pipelines",
+  "pages": ["list", "create", "runs", "schedules"]
+}

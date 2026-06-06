@@ -110,10 +110,16 @@ public class ValueResolverPipeline
         return CoerceToType(p, raw);
     }
 
+    private static string JsonEscapeString(string raw)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(raw);
+        return json[1..^1]; // strip surrounding quotes
+    }
+
     private static string CoerceToType(Placeholder p, string raw)
     {
         var typeMod = p.Modifiers.FirstOrDefault(m => m.StartsWith("type=", StringComparison.Ordinal));
-        if (typeMod is null) return raw;
+        if (typeMod is null) return JsonEscapeString(raw);
 
         var t = typeMod.Substring("type=".Length);
         return t switch

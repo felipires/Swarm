@@ -1,0 +1,4 @@
+{
+  "title": "Getting Started",
+  "pages": ["quickstart", "requirements", "docker-compose", "from-source"]
+}
