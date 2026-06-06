@@ -76,6 +76,8 @@ services:
       ASPNETCORE_URLS: "http://+:5000"
     ports:
       - "5000:5000"
+      - "5001:5001"
+      - "5002:5002"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -84,9 +86,15 @@ services:
       redis:
         condition: service_healthy
       rabbitmq:
-        condition: service_completed_successfully
+        condition: service_healthy
     networks:
       - swarm-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     volumes:
       - ../src/Swarm.Cluster/logs:/app/logs
 
@@ -98,9 +106,10 @@ services:
       ClusterUrl: "http://cluster:5000"
       RabbitMQ__Hostname: "rabbitmq"
       ApiKey: ${NODE_API_KEY:-node-dev-key}
+      ASPNETCORE_ENVIRONMENT: Development
     depends_on:
       cluster:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     networks:

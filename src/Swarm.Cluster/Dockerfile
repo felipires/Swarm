@@ -20,7 +20,7 @@ RUN dotnet publish "Swarm.Cluster.csproj" -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 
 RUN apt-get update && \
-    apt-get install -y openssl && \
+    apt-get install -y openssl curl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -48,5 +48,7 @@ ENV ASPNETCORE_Kestrel__Certificates__Default__Path=/tmp/devcert.pfx
 ENV ASPNETCORE_Kestrel__Certificates__Default__Password=password
 
 EXPOSE 5000
+EXPOSE 5001
+EXPOSE 5002
 
 ENTRYPOINT ["dotnet", "Swarm.Cluster.dll"]

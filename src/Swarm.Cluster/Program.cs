@@ -101,11 +101,11 @@ builder.Services.AddEndpointsApiExplorer();
 builder.WebHost.ConfigureKestrel(options =>
 {
     // Port 5000 — pure HTTP/2, gRPC only (no TLS, no upgrade negotiation)
-    options.ListenLocalhost(5000, o => o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2);
+    options.ListenAnyIP(5000, o => o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2);
     // Port 5001 — HTTP/1.1 for REST API and Swagger
-    options.ListenLocalhost(5001, o => o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1);
+    options.ListenAnyIP(5001, o => o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1);
     // Port 5002 — HTTPS with HTTP/1.1+HTTP/2
-    options.ListenLocalhost(5002, o =>
+    options.ListenAnyIP(5002, o =>
     {
         o.UseHttps();
         o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;

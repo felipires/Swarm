@@ -9,4 +9,4 @@ RUN dotnet restore src/Swarm.Cluster/Swarm.Cluster.csproj
 RUN dotnet tool install --global dotnet-ef
 ENV PATH="$PATH:/root/.dotnet/tools"
 
-ENTRYPOINT ["dotnet", "ef", "database", "update", "--project", "src/Swarm.Cluster", "--startup-project", "src/Swarm.Cluster"]
+ENTRYPOINT ["dotnet", "ef", "database", "update", "--project", "src/Swarm.Cluster", "--startup-project", "src/Swarm.Cluster", "--no-build"]

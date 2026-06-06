@@ -35,10 +35,13 @@ var builder = Host.CreateDefaultBuilder(args)
             var clusterUrl = configuration["ClusterUrl"]
                 ?? throw new InvalidOperationException("ClusterUrl is not configured");
 
-            var isDevelopment = configuration["ASPNETCORE_ENVIRONMENT"] == "Development";
             var channelOptions = new GrpcChannelOptions();
 
-            if (isDevelopment)
+            if (clusterUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            {
+                AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
+            }
+            else
             {
                 var httpHandler = new HttpClientHandler
                 {
