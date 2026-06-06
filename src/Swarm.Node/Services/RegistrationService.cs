@@ -74,10 +74,16 @@ public class RegistrationService(
             // from SWARM_TAG_* env vars and the Swarm:Tags appsettings section.
             // P0-3b: handlers carry the Node's executable capability set — the
             // Cluster uses this for dispatch-time validation (P1-7).
+            var capacity = NodeMetricsCollector.ReadCapacity();
             var request = new RegisterNodeRequest
             {
                 ApiKey = _apiKey,
                 NodeId = NodeId,
+                Capacity = new NodeCapacity
+                {
+                    CpuCores = capacity.CpuCores,
+                    TotalMemoryBytes = capacity.TotalMemoryBytes,
+                },
             };
             foreach (var (k, v) in _tagState.Static)
                 request.StaticTags.Add(k, v);

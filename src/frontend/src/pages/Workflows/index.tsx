@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { IconSearch } from "../../components/shell/icons";
 import { apiClient } from "../../services/api";
 import { queryKeys } from "../../services/queryKeys";
@@ -21,15 +22,19 @@ const ListSkeleton = () => (
 
 const EmptyState = () => (
   <div className="rounded-lg border border-dashed border-[var(--swarm-border-strong)] bg-[var(--swarm-surface)] px-6 py-10 text-center">
-    <p className="text-sm font-medium text-[var(--swarm-ink)]">No pipelines defined</p>
+    <p className="text-sm font-medium text-[var(--swarm-ink)]">
+      No pipelines defined
+    </p>
     <p className="mx-auto mt-1 max-w-md text-sm text-[var(--swarm-muted)]">
-      A pipeline chains task steps with dependencies, dispatch strategies, and an
-      optional cron schedule. Define one through the cluster API to see it here.
+      A pipeline chains task steps with dependencies, dispatch strategies, and
+      an optional cron schedule. Define one through the cluster API to see it
+      here.
     </p>
   </div>
 );
 
 export const WorkflowsPage = () => {
+  const navigate = useNavigate();
   const [filter, setFilter] = useState("");
 
   const query = useQuery({
@@ -49,7 +54,8 @@ export const WorkflowsPage = () => {
         )
       : all;
     return [...matched].sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     );
   }, [query.data, filter]);
 
@@ -67,26 +73,36 @@ export const WorkflowsPage = () => {
           </p>
         </div>
 
-        {total > 0 && (
-          <div className="relative w-full max-w-xs">
-            <label htmlFor="pipeline-filter" className="sr-only">
-              Filter pipelines
-            </label>
-            <IconSearch
-              width={15}
-              height={15}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--swarm-muted)]"
-            />
-            <input
-              id="pipeline-filter"
-              type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter by name…"
-              className="w-full rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-surface)] py-1.5 pl-9 pr-3 text-sm text-[var(--swarm-ink)] placeholder:text-[var(--swarm-placeholder)] focus:border-[var(--swarm-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--swarm-primary)]/25"
-            />
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {total > 0 && (
+            <div className="relative w-full max-w-xs">
+              <label htmlFor="pipeline-filter" className="sr-only">
+                Filter pipelines
+              </label>
+              <IconSearch
+                width={15}
+                height={15}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--swarm-muted)]"
+              />
+              <input
+                id="pipeline-filter"
+                type="search"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter by name…"
+                className="w-full rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-surface)] py-1.5 pl-9 pr-3 text-sm text-[var(--swarm-ink)] placeholder:text-[var(--swarm-placeholder)] focus:border-[var(--swarm-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--swarm-primary)]/25"
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate("/workflows/new")}
+            className="inline-flex shrink-0 items-center rounded-md bg-[var(--swarm-primary)] px-3 py-1.5 text-sm font-medium text-[var(--swarm-on-primary)] transition-colors hover:bg-[var(--swarm-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)]"
+            style={{ transitionDuration: "var(--swarm-duration)" }}
+          >
+            New pipeline
+          </button>
+        </div>
       </header>
 
       {query.isLoading ? (

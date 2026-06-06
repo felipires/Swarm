@@ -72,6 +72,20 @@ public class PipelinesController : ControllerBase
         }
     }
 
+    [HttpGet("{id}/runs")]
+    public async Task<IActionResult> GetRunsById(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var runs = await _service.GetRunsByPipelineId(id, cancellationToken);
+            return Ok(new PagedResult<PipelineRunResponse>(runs.Select(PipelineRunResponse.From).ToList(), runs.Count, 0, runs.Count));
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new ApiError("PIPELINE_NOT_FOUND", $"Pipeline {id} not found"));
+        }
+    }
+
     [HttpPost("{id}/run")]
     public async Task<ActionResult<PipelineRunResponse>> StartRun(
         Guid id,

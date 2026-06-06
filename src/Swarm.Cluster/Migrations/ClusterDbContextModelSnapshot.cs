@@ -76,6 +76,9 @@ namespace Swarm.Cluster.Migrations
                         .HasColumnType("uuid")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<int?>("CpuCores")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -97,6 +100,9 @@ namespace Swarm.Cluster.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
+
+                    b.Property<long?>("TotalMemoryBytes")
+                        .HasColumnType("bigint");
 
                     b.HasKey("Id");
 

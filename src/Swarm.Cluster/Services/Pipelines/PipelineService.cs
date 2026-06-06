@@ -210,4 +210,11 @@ public class PipelineService
             .Where(s => s.PipelineRunId == runId)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(cancellationToken);
+
+    public async Task<List<PipelineRun>> GetRunsByPipelineId(Guid pipelineId, CancellationToken cancellationToken)
+    {
+        return await _db.PipelineRuns.Where(x => x.PipelineId == pipelineId)
+            .OrderByDescending(x => x.StartedAt)
+            .ToListAsync(cancellationToken);
+    }
 }

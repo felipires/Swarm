@@ -42,6 +42,16 @@ public class TaskInstanceResponse
     public Guid? NodeId { get; init; }
 
     public string Status { get; init; } = null!;
+
+    /// <summary>TaskType@version captured at dispatch (P1-4 snapshot).</summary>
+    public string TaskType { get; init; } = null!;
+
+    /// <summary>Config sent to the Node, snapshotted at dispatch (P1-4).</summary>
+    public string? ConfigJsonSnapshot { get; init; }
+
+    /// <summary>Per-run runtime params resolved into the dispatch (P1-6).</summary>
+    public string? RuntimeParamsJson { get; init; }
+
     public string? ResultJson { get; init; }
     public string? ErrorMessage { get; init; }
     public DateTime CreatedAt { get; init; }
@@ -54,6 +64,9 @@ public class TaskInstanceResponse
         TaskDefinitionId = i.TaskDefinitionId,
         NodeId = i.NodeId,
         Status = i.Status.ToString(),
+        TaskType = i.TaskType,
+        ConfigJsonSnapshot = i.ConfigJsonSnapshot,
+        RuntimeParamsJson = i.RuntimeParamsJson,
         ResultJson = i.ResultJson,
         ErrorMessage = i.ErrorMessage,
         CreatedAt = i.CreatedAt,

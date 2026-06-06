@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Swarm.Cluster.Models;
 using Swarm.Cluster.Models.Dto;
 using Swarm.Cluster.Services;
-// Disambiguate against the SDK's Swarm.Node namespace.
+using Swarm.Cluster.Services.Metrics;
 using Node = Swarm.Cluster.Models.Node;
 
 namespace Swarm.Cluster.Controllers;
@@ -13,16 +13,15 @@ public class NodesController : ControllerBase
 {
     private readonly ILogger<NodesController> _logger;
     private readonly NodeService _nodeService;
+    private readonly NodeMetricsStore _metricsStore;
 
-    public NodesController(ILogger<NodesController> logger, NodeService nodeService)
+    public NodesController(ILogger<NodesController> logger, NodeService nodeService, NodeMetricsStore metricsStore)
     {
         _logger = logger;
         _nodeService = nodeService;
+        _metricsStore = metricsStore;
     }
 
-    /// <summary>
-    /// Get nodes with optional status filter (paginated, P3-1).
-    /// </summary>
     [HttpGet]
     public async Task<ActionResult<PagedResult<NodeResponse>>> GetNodes(
         [FromQuery] Node.NodeStatus? status = null,
@@ -34,26 +33,30 @@ public class NodesController : ControllerBase
         var paging = new PageRequest { Page = page, PageSize = pageSize };
         var (nodes, total) = await _nodeService.GetNodesAsync(status, paging.Skip, paging.NormalizedPageSize);
 
-        var items = nodes.Select(n => new NodeResponse
+        var nodeIds = nodes.Select(n => n.Id).ToList();
+        var capsByNode = await _nodeService.GetCapabilityTaskTypesAsync(nodeIds);
+
+        // Fan-out Redis reads in parallel — best-effort; individual failures return null.
+        var metricsTasks = nodes.ToDictionary(
+            n => n.Id,
+            n => _metricsStore.GetLatestAsync(n.Id));
+        await Task.WhenAll(metricsTasks.Values);
+
+        var items = nodes.Select(n =>
         {
-            Id = n.Id,
-            Name = n.Name,
-            Status = n.Status,
-            LastHeartbeatAt = n.LastHeartbeatAt,
-            CreatedAt = n.CreatedAt
+            capsByNode.TryGetValue(n.Id, out var caps);
+            var snap = metricsTasks[n.Id].Result;
+            return NodeResponse.From(n, caps, snap is null ? null : ToDto(snap));
         }).ToList();
 
         return Ok(new PagedResult<NodeResponse>(items, total, paging.NormalizedPage, paging.NormalizedPageSize));
     }
 
-    /// <summary>
-    /// Get a specific node by ID
-    /// </summary>
     [HttpGet("{id}")]
     public async Task<ActionResult<NodeResponse>> GetNode(Guid id)
     {
         _logger.LogInformation("Fetching node: {NodeId}", id);
-        
+
         var node = await _nodeService.GetNodeByIdAsync(id);
         if (node == null)
         {
@@ -61,21 +64,13 @@ public class NodesController : ControllerBase
             return NotFound(new ApiError("NODE_NOT_FOUND", $"Node {id} not found"));
         }
 
-        var response = new NodeResponse
-        {
-            Id = node.Id,
-            Name = node.Name,
-            Status = node.Status,
-            LastHeartbeatAt = node.LastHeartbeatAt,
-            CreatedAt = node.CreatedAt
-        };
+        var capsByNode = await _nodeService.GetCapabilityTaskTypesAsync(new[] { id });
+        capsByNode.TryGetValue(id, out var caps);
+        var snap = await _metricsStore.GetLatestAsync(id);
 
-        return Ok(response);
+        return Ok(NodeResponse.From(node, caps, snap is null ? null : ToDto(snap)));
     }
 
-    /// <summary>
-    /// Delete a node
-    /// </summary>
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteNode(Guid id)
     {
@@ -83,33 +78,19 @@ public class NodesController : ControllerBase
 
         var node = await _nodeService.GetNodeByIdAsync(id);
         if (node == null)
-        {
             return NotFound(new ApiError("NODE_NOT_FOUND", $"Node {id} not found"));
-        }
 
         await _nodeService.DeleteNodeAsync(id);
         return Ok(new { message = "Node deleted successfully" });
     }
 
-    /// <summary>
-    /// Add or remove overlay tags on a node (D6 / P2-5). The Node receives the
-    /// updated set on its next heartbeat. Static tags reported at registration
-    /// are immutable and unaffected by this endpoint.
-    /// </summary>
     [HttpPatch("{id}/tags")]
     public async Task<ActionResult<Dictionary<string, string>>> UpdateOverlayTags(Guid id, [FromBody] UpdateOverlayTagsRequest body)
     {
-        // ErrorHandlingMiddleware (P3-2) maps NodeService's
-        // InvalidOperationException ("Node not found") into a 400 ApiError.
         var effective = await _nodeService.UpdateOverlayTagsAsync(id, body.Add, body.Remove);
         return Ok(effective);
     }
 
-    /// <summary>
-    /// Set a task-config env secret on the Node (P1-5a). Cluster queues the
-    /// op for delivery on the next heartbeat. The Node decrypts and stores
-    /// locally; the Cluster does not persist the value beyond the ack window.
-    /// </summary>
     [HttpPost("{id}/env")]
     public async Task<ActionResult> SetEnvSecret(Guid id, [FromBody] SetEnvSecretRequest body)
     {
@@ -120,10 +101,6 @@ public class NodesController : ControllerBase
         return Accepted(new { opId = op.Id, key = op.Key });
     }
 
-    /// <summary>
-    /// Queue a delete for a single key on the Node (P1-5a). The Node removes
-    /// the key from its local encrypted store on the next heartbeat.
-    /// </summary>
     [HttpDelete("{id}/env/{key}")]
     public async Task<ActionResult> DeleteEnvSecret(Guid id, string key)
     {
@@ -131,17 +108,38 @@ public class NodesController : ControllerBase
         return Accepted(new { opId = op.Id, key = op.Key });
     }
 
-    /// <summary>
-    /// List env keys currently pending delivery to the Node (P1-5a). Does
-    /// not include keys the Node has already applied — operators wanting
-    /// authoritative state must read the Node directly.
-    /// </summary>
     [HttpGet("{id}/env")]
     public async Task<ActionResult<List<string>>> ListEnvSecrets(Guid id)
     {
         var keys = await _nodeService.ListPendingEnvKeysAsync(id);
         return Ok(keys);
     }
+
+    /// <summary>
+    /// P5-1: recent metrics history for a node (newest-first, up to 120 samples).
+    /// Returns empty list if Redis is unavailable or no history recorded yet.
+    /// </summary>
+    [HttpGet("{id}/metrics")]
+    public async Task<ActionResult<List<NodeMetricsDto>>> GetMetricsHistory(Guid id)
+    {
+        var node = await _nodeService.GetNodeByIdAsync(id);
+        if (node == null)
+            return NotFound(new ApiError("NODE_NOT_FOUND", $"Node {id} not found"));
+
+        var history = await _metricsStore.GetHistoryAsync(id);
+        return Ok(history.Select(ToDto).ToList());
+    }
+
+    private static NodeMetricsDto ToDto(NodeMetricsSnapshot s) => new()
+    {
+        RecordedAt = s.RecordedAt,
+        CpuPercent = s.CpuPercent,
+        MemoryUsedBytes = s.MemoryUsedBytes,
+        MemoryAvailableBytes = s.MemoryAvailableBytes,
+        InFlightTasks = s.InFlightTasks,
+        UptimeSeconds = s.UptimeSeconds,
+        Health = s.Health,
+    };
 }
 
 public record UpdateOverlayTagsRequest(
@@ -149,4 +147,3 @@ public record UpdateOverlayTagsRequest(
     List<string>? Remove = null);
 
 public record SetEnvSecretRequest(string Key, string Value);
-

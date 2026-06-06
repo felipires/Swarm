@@ -17,6 +17,18 @@ public class Node
     public string? StaticTagsJson { get; set; }
 
     /// <summary>
+    /// P5-1: CPU core count reported at registration. Null until the Node
+    /// sends a <c>NodeCapacity</c> message.
+    /// </summary>
+    public int? CpuCores { get; set; }
+
+    /// <summary>
+    /// P5-1: total physical/cgroup memory in bytes reported at registration.
+    /// Null until the Node sends a <c>NodeCapacity</c> message.
+    /// </summary>
+    public long? TotalMemoryBytes { get; set; }
+
+    /// <summary>
     /// GIN-indexed jsonb projection of this Node's <em>effective</em> tags —
     /// <c>static ∪ overlay</c>, static winning on key conflict (D6). This is a
     /// query-optimization denormalization for tag-containment routing (P3-3);

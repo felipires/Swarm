@@ -3,11 +3,13 @@ using Microsoft.OpenApi.Models;
 using Npgsql;
 using RabbitMQ.Client;
 using Serilog;
+using StackExchange.Redis;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.GrpcServices;
 using Swarm.Cluster.Logging;
 using Swarm.Cluster.Middleware;
 using Swarm.Cluster.Services;
+using Swarm.Cluster.Services.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,11 +28,18 @@ builder.Services.AddSingleton(NpgsqlDataSource.Create(connectionString));
 builder.Services.AddDbContext<ClusterDbContext>((sp, options) =>
     options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>()));
 
-// builder.Services.AddStackExchangeRedisCache(options =>
-// {
-//     var redisConfig = builder.Configuration.GetSection("Redis");
-//     options.builder.Configuration = redisConfig["Connection"];
-// });
+// P5-1: Redis — IConnectionMultiplexer for raw list/TTL ops in NodeMetricsStore.
+// AbortOnConnectFail=false: multiplexer creation succeeds even when Redis is
+// unreachable at startup; operations fail at call-site, where NodeMetricsStore
+// already catches and logs the exception (best-effort, never fails a heartbeat).
+var redisConfig = ConfigurationOptions.Parse(
+    builder.Configuration["Redis:Connection"] ?? "localhost:6379");
+redisConfig.AbortOnConnectFail = false;
+redisConfig.ConnectTimeout = 1000;   // 1s connect attempt
+redisConfig.SyncTimeout = 1000;      // 1s per command — fail fast when Redis is down
+
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisConfig));
+builder.Services.AddSingleton<NodeMetricsStore>();
 
 // RabbitMQ shared connection
 builder.Services.AddSingleton<IConnection>(_ =>

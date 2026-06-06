@@ -32,8 +32,7 @@ public sealed class WebhookHandlerV1 : ITaskHandler
                 "signatureHeader": { "type": "string" }
               }
             }
-            """,
-            RequiredParams = ["url", "secret"]
+            """
     };
 
     public async Task<TaskResult> HandleAsync(TaskContext context)

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Grpc.Net.Client;
 using Swarm.Cluster.Services;
 using Swarm.Node.Configuration;
@@ -12,6 +13,7 @@ public class HeartBeatService(
     RegistrationService registrationService,
     NodeTagState tagState,
     EnvSecretsStore envSecrets,
+    NodeMetricsCollector metricsCollector,
     IServiceProvider serviceProvider)
 {
     private readonly string _apiKey = configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey is not configured");
@@ -21,23 +23,17 @@ public class HeartBeatService(
     private readonly RegistrationService _registrationService = registrationService;
     private readonly NodeTagState _tagState = tagState;
     private readonly EnvSecretsStore _envSecrets = envSecrets;
+    private readonly NodeMetricsCollector _metricsCollector = metricsCollector;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
-    /// <summary>
-    /// Op IDs from the previous heartbeat that were applied locally. The next
-    /// heartbeat request carries this list so the Cluster can delete the rows.
-    /// </summary>
     private readonly List<string> _pendingAcks = new();
 
-    // P2-1: NodeId is published into IConfiguration by NodeIdentityResolver
-    // before any heartbeat fires. Read on demand so this singleton doesn't
-    // capture an empty string at construction time.
     private string NodeId => _configuration["NodeId"]
         ?? throw new InvalidOperationException("NodeId is not yet resolved");
 
     public async Task<bool> SendHeartBeatAsync()
     {
-        _logger.LogInformation("Sending heartbeat to cluster for node {NodeId}", NodeId);
+        _logger.LogDebug("Sending heartbeat to cluster for node {NodeId}", NodeId);
         try
         {
             var client = new NodesService.NodesServiceClient(_grpcChannel);
@@ -58,6 +54,33 @@ public class HeartBeatService(
             foreach (var id in acksThisTick)
                 request.AckedEnvOpIds.Add(id);
 
+            // P5-1: attach live metrics. Best-effort — a sampling failure never
+            // fails the heartbeat; the Cluster simply receives no metrics this tick.
+            try
+            {
+                var executor = _serviceProvider.GetService<TaskExecutorService>();
+                var liveMetrics = _metricsCollector.ReadMetrics(executor?.InFlightTasks ?? 0);
+                request.Metrics = new NodeMetrics
+                {
+                    CpuPercent = liveMetrics.CpuPercent,
+                    MemoryUsedBytes = liveMetrics.MemoryUsedBytes,
+                    MemoryAvailableBytes = liveMetrics.MemoryAvailableBytes,
+                    InFlightTasks = liveMetrics.InFlightTasks,
+                    UptimeSeconds = liveMetrics.UptimeSeconds,
+                    Health = liveMetrics.Health switch
+                    {
+                        NodeHealthStatus.Degraded => HealthStatus.Degraded,
+                        NodeHealthStatus.Unhealthy => HealthStatus.Unhealthy,
+                        _ => HealthStatus.Healthy,
+                    },
+                };
+                _logger.LogInformation("Metrics sent to cluster {metrics}", JsonSerializer.Serialize(request.Metrics));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Metrics sampling skipped this heartbeat");
+            }
+
             var response = await client.RecordHeartbeatAsync(request);
 
             if (!response.Success && response.Message == "NodeNotFound")
@@ -72,9 +95,7 @@ public class HeartBeatService(
             // P1-5a: apply env ops the Cluster pushed in this response.
             await ApplyEnvOpsAsync(response.PendingEnvOps);
 
-            // P0-3a: reconcile tagged-queue subscriptions. Resolved via the
-            // service provider to avoid a hard ctor cycle (TaskExecutorService
-            // is also a singleton built later in the lifetime).
+            // P0-3a: reconcile tagged-queue subscriptions.
             try
             {
                 var executor = _serviceProvider.GetRequiredService<TaskExecutorService>();
@@ -113,8 +134,6 @@ public class HeartBeatService(
             }
             catch (Exception ex)
             {
-                // Leave the op un-acked — Cluster will re-send after the grace
-                // window. The operator should investigate if it keeps failing.
                 _logger.LogError(ex,
                     "Failed to apply env op {OpId} {Kind} {Key}; will retry on next heartbeat",
                     op.Id, op.Kind, op.Key);

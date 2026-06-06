@@ -18,6 +18,9 @@ message RegisterNodeRequest {
   // Handlers this Node is willing to execute (P0-3b). Reported wholesale on
   // every registration — the Cluster replaces this Node's capability rows.
   repeated HandlerCapability handlers = 4;
+  // P5-1: static hardware capacity — sent once at registration, immutable per
+  // process lifetime. Persisted on the Node row for durable display.
+  NodeCapacity capacity = 5;
 }
 
 message HandlerCapability {
@@ -51,6 +54,9 @@ message RecordHeartbeatRequest {
   // P1-5a: IDs of env ops the Node has applied since the last heartbeat.
   // The Cluster deletes these so they're not redelivered.
   repeated string acked_env_op_ids = 4;
+  // P5-1: live resource gauges attached to every heartbeat. Best-effort —
+  // absent field means the Node does not (yet) collect metrics.
+  NodeMetrics metrics = 5;
 }
 
 message RecordHeartbeatResponse {
@@ -82,4 +88,26 @@ message EnvOp {
 enum EnvOpKind {
   SET = 0;
   DELETE_KEY = 1;
+}
+
+// P5-1 — static hardware capacity reported once at registration.
+message NodeCapacity {
+  int32 cpu_cores = 1;
+  int64 total_memory_bytes = 2;
+}
+
+// P5-1 — live resource gauges reported on every heartbeat.
+message NodeMetrics {
+  double cpu_percent = 1;
+  int64 memory_used_bytes = 2;
+  int64 memory_available_bytes = 3;
+  int32 in_flight_tasks = 4;
+  int64 uptime_seconds = 5;
+  HealthStatus health = 6;
+}
+
+enum HealthStatus {
+  HEALTHY = 0;
+  DEGRADED = 1;
+  UNHEALTHY = 2;
 }

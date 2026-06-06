@@ -34,7 +34,9 @@ public class NodeService
         string apiKey,
         Guid? nodeId,
         Dictionary<string, string>? staticTags = null,
-        IReadOnlyList<NodeCapability>? capabilities = null)
+        IReadOnlyList<NodeCapability>? capabilities = null,
+        int? cpuCores = null,
+        long? totalMemoryBytes = null)
     {
         _logger.LogInformation("Registering node: {NodeName}", nodeId);
 
@@ -63,6 +65,8 @@ public class NodeService
             node.LastHeartbeatAt = DateTime.UtcNow;
             node.StaticTagsJson = staticTagsJson;
             node.EffectiveTagsJson = effectiveTagsJson;
+            if (cpuCores.HasValue) node.CpuCores = cpuCores;
+            if (totalMemoryBytes.HasValue) node.TotalMemoryBytes = totalMemoryBytes;
         }
         else
         {
@@ -75,6 +79,8 @@ public class NodeService
                 LastHeartbeatAt = DateTime.UtcNow,
                 StaticTagsJson = staticTagsJson,
                 EffectiveTagsJson = effectiveTagsJson,
+                CpuCores = cpuCores,
+                TotalMemoryBytes = totalMemoryBytes,
             };
             _dbContext.Nodes.Add(node);
         }
@@ -170,6 +176,80 @@ public class NodeService
     public async Task<Node?> GetNodeByIdAsync(Guid nodeId)
     {
         return await _dbContext.Nodes.FindAsync(nodeId);
+    }
+
+    /// <summary>
+    /// Map the advertised TaskType@version capabilities for the given Nodes in a
+    /// single query (P0-3b). Returns a lookup keyed by NodeId; Nodes with no
+    /// reported handlers are absent from the map.
+    /// </summary>
+    public async Task<Dictionary<Guid, List<string>>> GetCapabilityTaskTypesAsync(IReadOnlyCollection<Guid> nodeIds)
+    {
+        if (nodeIds.Count == 0)
+            return new Dictionary<Guid, List<string>>();
+
+        var rows = await _dbContext.NodeCapabilities
+            .Where(c => nodeIds.Contains(c.NodeId))
+            .Select(c => new { c.NodeId, c.TaskType })
+            .ToListAsync();
+
+        return rows
+            .GroupBy(r => r.NodeId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(r => r.TaskType).OrderBy(t => t).ToList());
+    }
+
+    /// <summary>
+    /// Cluster-wide capability catalog: the distinct TaskType@version handlers
+    /// any Node currently advertises, each with its declared schema and
+    /// resolution requirements, plus how many Nodes offer it. Per D3 the schema
+    /// is immutable per version, so a TaskType resolves to one schema; the most
+    /// recently reported row wins if rows ever differ.
+    /// </summary>
+    public async Task<List<CapabilityCatalogEntry>> GetCapabilityCatalogAsync()
+    {
+        var rows = await _dbContext.NodeCapabilities
+            .Select(c => new
+            {
+                c.TaskType,
+                c.JsonSchema,
+                c.RequiredEnvKeysJson,
+                c.RequiredParamsJson,
+                c.ReportedAt,
+            })
+            .ToListAsync();
+
+        return rows
+            .GroupBy(r => r.TaskType)
+            .Select(g =>
+            {
+                var latest = g.OrderByDescending(r => r.ReportedAt).First();
+                return new CapabilityCatalogEntry
+                {
+                    TaskType = g.Key,
+                    JsonSchema = latest.JsonSchema,
+                    RequiredEnvKeys = ParseStringList(latest.RequiredEnvKeysJson),
+                    RequiredParams = ParseStringList(latest.RequiredParamsJson),
+                    NodeCount = g.Count(),
+                };
+            })
+            .OrderBy(e => e.TaskType)
+            .ToList();
+    }
+
+    private static List<string> ParseStringList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new();
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) ?? new();
+        }
+        catch (JsonException)
+        {
+            return new();
+        }
     }
 
     /// <summary>

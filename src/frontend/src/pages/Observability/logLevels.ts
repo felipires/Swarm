@@ -1,5 +1,3 @@
-import type { LogLevel } from "../../store/store";
-
 export interface LevelStyle {
   label: string;
   abbr: string;
@@ -7,25 +5,57 @@ export interface LevelStyle {
   bold?: boolean;
 }
 
-export const LEVEL_STYLE: Record<LogLevel, LevelStyle> = {
-  Debug: { label: "Debug", abbr: "DBG", color: "var(--swarm-muted)" },
-  Information: { label: "Info", abbr: "INF", color: "var(--swarm-ink)" },
-  Warning: { label: "Warning", abbr: "WRN", color: "var(--swarm-warning)" },
-  Error: { label: "Error", abbr: "ERR", color: "var(--swarm-danger)" },
-  Critical: { label: "Critical", abbr: "CRT", color: "var(--swarm-danger)", bold: true },
-};
+const DEBUG: LevelStyle = { label: "Debug", abbr: "DBG", color: "var(--swarm-muted)" };
+const INFO: LevelStyle = { label: "Info", abbr: "INF", color: "var(--swarm-ink)" };
+const WARN: LevelStyle = { label: "Warning", abbr: "WRN", color: "var(--swarm-log-warning)" };
+const ERROR: LevelStyle = { label: "Error", abbr: "ERR", color: "var(--swarm-danger)" };
+const CRIT: LevelStyle = { label: "Critical", abbr: "CRT", color: "var(--swarm-danger)", bold: true };
 
-/** Filter chip groups: each maps to the levels it admits. */
+/** Maps the worker's free-form level string (Serilog/MEL variants) to a style.
+ *  Tolerant: unknown levels fall back to Info so a row never crashes. */
+export function styleForLevel(level: string): LevelStyle {
+  switch (level.toLowerCase()) {
+    case "verbose":
+    case "trace":
+    case "debug":
+      return DEBUG;
+    case "information":
+    case "info":
+      return INFO;
+    case "warning":
+    case "warn":
+      return WARN;
+    case "error":
+      return ERROR;
+    case "fatal":
+    case "critical":
+      return CRIT;
+    default:
+      return INFO;
+  }
+}
+
+/** Which broad bucket a raw level belongs to, for filtering. */
+export type LevelBucket = "debug" | "info" | "warning" | "error";
+
+function bucketOf(level: string): LevelBucket {
+  const s = styleForLevel(level);
+  if (s === DEBUG) return "debug";
+  if (s === WARN) return "warning";
+  if (s === ERROR || s === CRIT) return "error";
+  return "info";
+}
+
 export const LEVEL_FILTERS = {
   All: null,
-  Info: ["Debug", "Information"],
-  Warning: ["Warning"],
-  Error: ["Error", "Critical"],
-} as const satisfies Record<string, LogLevel[] | null>;
+  Info: ["debug", "info"],
+  Warning: ["warning"],
+  Error: ["error"],
+} as const satisfies Record<string, LevelBucket[] | null>;
 
 export type LevelFilter = keyof typeof LEVEL_FILTERS;
 
-export function passesFilter(level: LogLevel, filter: LevelFilter): boolean {
-  const allowed = LEVEL_FILTERS[filter] as readonly LogLevel[] | null;
-  return allowed === null || allowed.includes(level);
+export function passesFilter(level: string, filter: LevelFilter): boolean {
+  const allowed = LEVEL_FILTERS[filter] as readonly LevelBucket[] | null;
+  return allowed === null || allowed.includes(bucketOf(level));
 }

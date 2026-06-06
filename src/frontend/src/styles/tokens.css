@@ -18,14 +18,20 @@
   --swarm-primary-subtle: oklch(0.94 0.03 113);
   --swarm-on-primary: oklch(0.99 0 0);
 
-  /* Semantic */
-  --swarm-success: oklch(0.52 0.14 145);
+  /* Semantic — foregrounds tuned to clear WCAG AA (4.5:1) as badge text on
+     their own -subtle backgrounds (audit P1). */
+  --swarm-success: oklch(0.46 0.15 145);
   --swarm-success-subtle: oklch(0.94 0.04 145);
-  --swarm-warning: oklch(0.62 0.16 65);
+  --swarm-warning: oklch(0.5 0.13 65);
   --swarm-warning-subtle: oklch(0.95 0.05 65);
-  --swarm-danger: oklch(0.52 0.2 25);
+  --swarm-danger: oklch(0.5 0.2 25);
   --swarm-danger-subtle: oklch(0.95 0.04 25);
   --swarm-info: oklch(0.5 0.12 250);
+
+  /* Log-level text sits on --swarm-bg and targets AAA (7:1) per PRODUCT.md.
+     A dedicated darker amber clears 7:1 without dragging the UI-wide warning
+     that dark on chips and buttons. */
+  --swarm-log-warning: oklch(0.45 0.12 65);
 
   --swarm-focus: oklch(0.42 0.1 113);
   --swarm-shadow: oklch(0.2 0.02 240 / 0.08);
@@ -58,6 +64,8 @@
     --swarm-success-subtle: oklch(0.22 0.05 145);
     --swarm-warning: oklch(0.78 0.14 65);
     --swarm-warning-subtle: oklch(0.24 0.05 65);
+    /* Dark warning already clears AAA (~9.9:1) on the dark bg. */
+    --swarm-log-warning: oklch(0.78 0.14 65);
     --swarm-danger: oklch(0.68 0.18 25);
     --swarm-danger-subtle: oklch(0.22 0.06 25);
     --swarm-info: oklch(0.72 0.1 250);

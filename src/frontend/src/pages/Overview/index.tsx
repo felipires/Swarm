@@ -7,6 +7,7 @@ import { apiClient } from "../../services/api";
 import { queryKeys } from "../../services/queryKeys";
 import type { Node } from "../../store/store";
 import { absoluteTime } from "../../utils/time";
+import { ClusterResourcePanel } from "./ClusterResourcePanel";
 import { NodeTable } from "./NodeTable";
 import { SummaryBand } from "./SummaryBand";
 
@@ -116,6 +117,8 @@ export const OverviewPage = ({ pulse }: OverviewPageProps) => {
         failedToday={activity.failedToday}
         loading={initialLoad}
       />
+
+      {!initialLoad && nodes.length > 0 && <ClusterResourcePanel nodes={nodes} />}
 
       <section aria-label="Registered nodes">
         {pulse.connection === "disconnected" ? (

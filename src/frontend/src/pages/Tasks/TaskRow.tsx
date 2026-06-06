@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { IconChevron, IconTrash } from "../../components/shell/icons";
+import { IconChevron } from "../../components/shell/icons";
+import { ConfirmDeleteButton } from "../../components/ui/ConfirmDeleteButton";
 import { apiClient } from "../../services/api";
 import { queryKeys } from "../../services/queryKeys";
 import type { TaskDefinition } from "../../store/store";
@@ -33,12 +34,6 @@ export function TaskRow({ task, now }: TaskRowProps) {
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.tasks }),
   });
-
-  const handleDelete = () => {
-    if (window.confirm(`Delete task "${task.name}"? This cannot be undone.`)) {
-      remove.mutate();
-    }
-  };
 
   return (
     <div className="border-b border-[var(--swarm-border)] last:border-b-0">
@@ -80,16 +75,11 @@ export function TaskRow({ task, now }: TaskRowProps) {
           {relativeTime(task.updatedAt, now)}
         </span>
 
-        <button
-          type="button"
-          onClick={handleDelete}
+        <ConfirmDeleteButton
+          onConfirm={() => remove.mutate()}
           disabled={remove.isPending}
-          aria-label={`Delete task ${task.name}`}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--swarm-muted)] transition-colors hover:bg-[var(--swarm-danger-subtle)] hover:text-[var(--swarm-danger)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)] disabled:opacity-40"
-          style={{ transitionDuration: "var(--swarm-duration)" }}
-        >
-          <IconTrash width={15} height={15} />
-        </button>
+          label={`Delete task ${task.name}`}
+        />
       </div>
 
       {expanded && (

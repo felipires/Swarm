@@ -66,6 +66,7 @@ var builder = Host.CreateDefaultBuilder(args)
         services.AddSingleton<BackgroundMaestro>();
         services.AddSingleton<AppDbConnection>();
         services.AddSingleton<EnvSecretsStore>();
+        services.AddSingleton<NodeMetricsCollector>();
         services.AddSingleton<RegistrationService>();
         services.AddSingleton<HeartBeatService>();
         services.AddSingleton<TaskExecutorService>();

@@ -34,8 +34,7 @@ public sealed class HttpHandlerV1 : ITaskHandler
                 "timeoutSeconds": { "type": "integer", "minimum": 1 }
               }
             }
-            """,
-            RequiredParams = ["method", "url"]
+            """
     };
 
     public async Task<TaskResult> HandleAsync(TaskContext context)

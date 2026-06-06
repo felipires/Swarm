@@ -28,6 +28,9 @@ public class TaskExecutorService : IAsyncDisposable
     // P0-3a: tagged-queue subscriptions the Node currently holds, queueName → RabbitMQ consumer tag.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _taggedConsumers = new();
     private readonly SemaphoreSlim _subscriptionGate = new(1, 1);
+    // P5-1: atomic counter for the heartbeat metrics "in_flight_tasks" gauge.
+    private volatile int _inFlightTasks;
+    public int InFlightTasks => _inFlightTasks;
 
     public const string ResultQueueName = "task-results";
     public const string ClaimQueueName = "task-claims";
@@ -189,7 +192,16 @@ public class TaskExecutorService : IAsyncDisposable
             var localId = await SaveLocalTaskAsync(message);
             await UpdateLocalTaskStatusAsync(localId, "running");
 
-            var result = await DispatchAsync(message, cancellationToken);
+            Interlocked.Increment(ref _inFlightTasks);
+            TaskResult result;
+            try
+            {
+                result = await DispatchAsync(message, cancellationToken);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlightTasks);
+            }
 
             await UpdateLocalTaskStatusAsync(localId, result.Success ? "completed" : "failed");
             await PublishResultAsync(new TaskResultMessage

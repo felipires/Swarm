@@ -1,16 +1,20 @@
+using System.Text.Json;
 using Grpc.Core;
 using Swarm.Cluster.Services;
+using Swarm.Cluster.Services.Metrics;
 
 namespace Swarm.Cluster.GrpcServices;
 
 public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.NodesServiceBase
 {
     private readonly NodeService _nodeService;
+    private readonly NodeMetricsStore _metricsStore;
     private readonly ILogger<NodesGrpcService> _logger;
 
-    public NodesGrpcService(NodeService nodeService, ILogger<NodesGrpcService> logger)
+    public NodesGrpcService(NodeService nodeService, NodeMetricsStore metricsStore, ILogger<NodesGrpcService> logger)
     {
         _nodeService = nodeService;
+        _metricsStore = metricsStore;
         _logger = logger;
     }
 
@@ -37,7 +41,10 @@ public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.Node
             })
             .ToList();
 
-        var response = await _nodeService.RegisterNodeAsync(request.ApiKey, nodeId, staticTags, capabilities);
+        int? cpuCores = request.Capacity?.CpuCores > 0 ? request.Capacity.CpuCores : null;
+        long? totalMemory = request.Capacity?.TotalMemoryBytes > 0 ? request.Capacity.TotalMemoryBytes : null;
+
+        var response = await _nodeService.RegisterNodeAsync(request.ApiKey, nodeId, staticTags, capabilities, cpuCores, totalMemory);
 
         return new RegisterNodeResponse
         {
@@ -99,6 +106,23 @@ public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.Node
 
         foreach (var queue in await _nodeService.GetTaggedSubscriptionsAsync(nodeId))
             response.TaggedSubscriptions.Add(queue);
+
+        _logger.LogInformation("{metrics}", JsonSerializer.Serialize(request.Metrics));
+        // P5-1: store live metrics best-effort — never fail a heartbeat for this.
+        if (request.Metrics is not null)
+        {
+            var snapshot = new NodeMetricsSnapshot
+            {
+                RecordedAt = DateTime.UtcNow,
+                CpuPercent = request.Metrics.CpuPercent,
+                MemoryUsedBytes = request.Metrics.MemoryUsedBytes,
+                MemoryAvailableBytes = request.Metrics.MemoryAvailableBytes,
+                InFlightTasks = request.Metrics.InFlightTasks,
+                UptimeSeconds = request.Metrics.UptimeSeconds,
+                Health = request.Metrics.Health.ToString(),
+            };
+            await _metricsStore.StoreAsync(nodeId, snapshot);
+        }
 
         return response;
     }

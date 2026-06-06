@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LogEntry } from "../../store/store";
-import { LEVEL_STYLE, passesFilter, type LevelFilter } from "./logLevels";
+import { passesFilter, styleForLevel, type LevelFilter } from "./logLevels";
 
 const ROW_HEIGHT = 22;
 const OVERSCAN = 8;
@@ -26,12 +26,12 @@ function logTime(iso: string): string {
 }
 
 function LogRow({ entry, top }: { entry: LogEntry; top: number }) {
-  const style = LEVEL_STYLE[entry.level];
-  const message = entry.renderedMessage || entry.messageTemplate;
+  const style = styleForLevel(entry.level);
+  const message = entry.message;
 
   return (
     <div
-      className="absolute left-0 right-0 flex items-baseline gap-3 px-3 font-mono text-xs"
+      className="absolute left-0 right-0 flex items-center gap-3 px-3 font-mono text-xs"
       style={{ top, height: ROW_HEIGHT, lineHeight: `${ROW_HEIGHT}px` }}
     >
       <span className="shrink-0 tabular-nums text-[var(--swarm-muted)]">
@@ -70,7 +70,7 @@ export function LogStreamPanel({
     return entries.filter((e) => {
       if (!passesFilter(e.level, filter)) return false;
       if (!q) return true;
-      const msg = (e.renderedMessage || e.messageTemplate).toLowerCase();
+      const msg = e.message.toLowerCase();
       return msg.includes(q);
     });
   }, [entries, filter, query]);
@@ -123,7 +123,6 @@ export function LogStreamPanel({
       onScroll={handleScroll}
       className="relative h-full overflow-y-auto bg-[var(--swarm-bg)]"
       role="log"
-      aria-live="polite"
       aria-label="Log stream"
       tabIndex={0}
     >
