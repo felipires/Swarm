@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Swarm.Cluster.Data;
@@ -11,9 +12,11 @@ using Swarm.Cluster.Data;
 namespace Swarm.Cluster.Migrations
 {
     [DbContext(typeof(ClusterDbContext))]
-    partial class ClusterDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260606205113_P1_8_StepOutputMapping")]
+    partial class P1_8_StepOutputMapping
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -390,9 +393,6 @@ namespace Swarm.Cluster.Migrations
 
                     b.Property<Guid>("PipelineId")
                         .HasColumnType("uuid");
-
-                    b.Property<string>("RuntimeParamsJson")
-                        .HasColumnType("text");
 
                     b.Property<int?>("StrategyOverride")
                         .HasColumnType("integer");

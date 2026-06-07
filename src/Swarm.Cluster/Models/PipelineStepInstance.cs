@@ -25,6 +25,13 @@ public class PipelineStepInstance
     public DateTime? DispatchedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// Snapshot of <see cref="TaskInstance.ResultJson"/> captured when this
+    /// step transitions to Completed (P1-8). Read by downstream steps that
+    /// declare output mappings referencing this step.
+    /// </summary>
+    public string? ResultJson { get; set; }
 }
 
 public enum PipelineStepInstanceStatus

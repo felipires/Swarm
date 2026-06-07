@@ -12,10 +12,17 @@ interface StepDetailProps {
   taskName: string;
   /** The step's instance in the selected run, if a run is selected. */
   instance: PipelineStepInstance | null;
+  /** All steps in the pipeline — to find which consume this step's output. */
+  allSteps: PipelineStep[];
   onClose: () => void;
 }
 
-export function StepDetail({ step, taskName, instance, onClose }: StepDetailProps) {
+export function StepDetail({ step, taskName, instance, allSteps, onClose }: StepDetailProps) {
+  const mappings = step.outputMappings ?? [];
+  const downstreamCount = allSteps.filter((s) =>
+    s.outputMappings?.some((m) => m.fromStep === step.name),
+  ).length;
+
   const taskInstanceId = instance?.taskInstanceId ?? null;
   const taskInstanceQuery = useQuery({
     queryKey: queryKeys.taskInstance(taskInstanceId ?? ""),
@@ -79,6 +86,28 @@ export function StepDetail({ step, taskName, instance, onClose }: StepDetailProp
               )}
             </dl>
 
+            {step.runtimeParamsJson && (
+              <JsonViewer value={step.runtimeParamsJson} label="Step params (static)" />
+            )}
+
+            {mappings.length > 0 && (
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--swarm-muted)]">
+                  Mapped inputs
+                </p>
+                <dl className="mt-1 space-y-0.5 text-xs">
+                  {mappings.map((m, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-1">
+                      <span className="font-mono text-[var(--swarm-ink)]">{m.fromPath}</span>
+                      <span className="text-[var(--swarm-muted)]" aria-hidden>→</span>
+                      <span className="font-mono text-[var(--swarm-ink)]">{m.toParam}</span>
+                      <span className="text-[var(--swarm-muted)]">from {m.fromStep}</span>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            )}
+
             {instance.errorMessage && (
               <div className="rounded-md border border-[var(--swarm-danger)]/30 bg-[var(--swarm-danger-subtle)] px-3 py-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-[var(--swarm-danger)]">
@@ -102,7 +131,14 @@ export function StepDetail({ step, taskName, instance, onClose }: StepDetailProp
                     <JsonViewer value={taskInstance.configJsonSnapshot} label="Config (snapshot)" />
                   )}
                   {taskInstance?.resultJson && (
-                    <JsonViewer value={taskInstance.resultJson} label="Result (output)" />
+                    <JsonViewer
+                      value={taskInstance.resultJson}
+                      label={
+                        downstreamCount > 0
+                          ? `Result (output) · used by ${downstreamCount} downstream step${downstreamCount === 1 ? "" : "s"}`
+                          : "Result (output)"
+                      }
+                    />
                   )}
                   {!taskInstance?.resultJson && !instance.errorMessage && (
                     <p className="text-sm text-[var(--swarm-muted)]">

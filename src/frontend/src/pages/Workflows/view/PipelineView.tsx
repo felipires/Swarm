@@ -1,4 +1,9 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { IconChevron } from "../../../components/shell/icons";
@@ -19,7 +24,8 @@ function parseParams(
   if (raw.trim() === "") return { ok: true, value: undefined };
   try {
     const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+      return { ok: false };
     return { ok: true, value: parsed };
   } catch {
     return { ok: false };
@@ -68,7 +74,9 @@ export function PipelineView() {
     enabled: Boolean(selectedRunId),
     refetchInterval: (q) => {
       const data = q.state.data as PipelineStepInstance[] | undefined;
-      const active = data?.some((s) => s.status === "Dispatched" || s.status === "Waiting");
+      const active = data?.some(
+        (s) => s.status === "Dispatched" || s.status === "Waiting",
+      );
       return active ? 4000 : false;
     },
   });
@@ -93,9 +101,11 @@ export function PipelineView() {
   });
   const paramsValid = parseParams(paramsRaw).ok;
 
-  const selectedStep = pipeline?.steps.find((s) => s.id === selectedStepId) ?? null;
+  const selectedStep =
+    pipeline?.steps.find((s) => s.id === selectedStepId) ?? null;
   const taskNameFor = (taskId: string) =>
-    tasksQuery.data?.find((t) => t.id === taskId)?.name ?? `${taskId.slice(0, 8)}…`;
+    tasksQuery.data?.find((t) => t.id === taskId)?.name ??
+    `${taskId.slice(0, 8)}…`;
 
   return (
     <div className="flex h-full flex-col">
@@ -118,7 +128,9 @@ export function PipelineView() {
             {pipeline && <ScheduleChip pipelineId={pipeline.id} />}
           </div>
           {pipeline?.description && (
-            <p className="truncate text-xs text-[var(--swarm-muted)]">{pipeline.description}</p>
+            <p className="truncate text-xs text-[var(--swarm-muted)]">
+              {pipeline.description}
+            </p>
           )}
         </div>
 
@@ -149,7 +161,8 @@ export function PipelineView() {
               htmlFor="canvas-run-params"
               className="mb-1 block text-xs font-medium uppercase tracking-wide text-[var(--swarm-muted)]"
             >
-              Runtime params <span className="font-normal normal-case">(JSON, optional)</span>
+              Runtime params{" "}
+              <span className="font-normal normal-case">(JSON, optional)</span>
             </label>
             <textarea
               id="canvas-run-params"
@@ -162,10 +175,15 @@ export function PipelineView() {
               className="w-full rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-bg)] px-3 py-2 font-mono text-xs text-[var(--swarm-ink)] placeholder:text-[var(--swarm-placeholder)] focus:border-[var(--swarm-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--swarm-primary)]/25"
             />
             {!paramsValid && (
-              <p className="mt-1 text-xs text-[var(--swarm-danger)]">Params must be a JSON object.</p>
+              <p className="mt-1 text-xs text-[var(--swarm-danger)]">
+                Params must be a JSON object.
+              </p>
             )}
             {run.isError && (
-              <p className="mt-1 text-xs text-[var(--swarm-danger)]" role="alert">
+              <p
+                className="mt-1 text-xs text-[var(--swarm-danger)]"
+                role="alert"
+              >
                 Could not start the run. Check that matching nodes are online.
               </p>
             )}
@@ -203,12 +221,13 @@ export function PipelineView() {
           )}
 
           {/* Step detail floats over the canvas when a step is selected. */}
-          {selectedStep && (
-            <div className="absolute bottom-4 right-4 top-4 z-10 w-80 overflow-hidden rounded-lg border border-[var(--swarm-border)] bg-[var(--swarm-surface)] shadow-lg">
+          {pipeline && selectedStep && (
+            <div className="absolute bottom-4 right-4 top-4 z-10 w-2/6 overflow-hidden rounded-lg border border-[var(--swarm-border)] bg-[var(--swarm-surface)] shadow-lg">
               <StepDetail
                 step={selectedStep}
                 taskName={taskNameFor(selectedStep.taskDefinitionId)}
                 instance={stepStatusById.get(selectedStep.id) ?? null}
+                allSteps={pipeline.steps}
                 onClose={() => setSelectedStepId(null)}
               />
             </div>
@@ -217,7 +236,7 @@ export function PipelineView() {
 
         {drawerOpen && pipeline && (
           <aside
-            className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-[var(--swarm-border)] bg-[var(--swarm-surface)]"
+            className="flex w-2/6 shrink-0 flex-col overflow-hidden border-l border-[var(--swarm-border)] bg-[var(--swarm-surface)]"
             aria-label="Run history"
           >
             <div className="flex items-center justify-between border-b border-[var(--swarm-border)] px-4 py-2.5">
@@ -245,7 +264,9 @@ export function PipelineView() {
                   ))}
                 </div>
               ) : runs.length === 0 ? (
-                <p className="p-2 text-sm text-[var(--swarm-muted)]">No runs yet.</p>
+                <p className="p-2 text-sm text-[var(--swarm-muted)]">
+                  No runs yet.
+                </p>
               ) : (
                 <ul className="space-y-1">
                   {runs.map((r) => {
@@ -264,7 +285,9 @@ export function PipelineView() {
                               ? "bg-[var(--swarm-primary-subtle)]"
                               : "hover:bg-[var(--swarm-surface-raised)]"
                           }`}
-                          style={{ transitionDuration: "var(--swarm-duration)" }}
+                          style={{
+                            transitionDuration: "var(--swarm-duration)",
+                          }}
                         >
                           <div className="flex items-center justify-between gap-2">
                             <StatusPill
@@ -284,7 +307,10 @@ export function PipelineView() {
                               {duration(r.startedAt, r.completedAt, now)}
                             </span>
                             {r.errorMessage && (
-                              <span className="truncate font-mono text-[var(--swarm-danger)]" title={r.errorMessage}>
+                              <span
+                                className="truncate font-mono text-[var(--swarm-danger)]"
+                                title={r.errorMessage}
+                              >
                                 {r.errorMessage}
                               </span>
                             )}
@@ -304,7 +330,9 @@ export function PipelineView() {
                   className="mt-2 w-full rounded-md px-2 py-1.5 text-xs font-medium text-[var(--swarm-primary)] transition-colors hover:bg-[var(--swarm-primary-subtle)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)] disabled:opacity-50"
                   style={{ transitionDuration: "var(--swarm-duration)" }}
                 >
-                  {runsQuery.isFetchingNextPage ? "Loading…" : "Show older runs"}
+                  {runsQuery.isFetchingNextPage
+                    ? "Loading…"
+                    : "Show older runs"}
                 </button>
               )}
             </div>

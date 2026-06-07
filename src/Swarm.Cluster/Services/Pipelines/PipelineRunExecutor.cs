@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.Models;
@@ -82,6 +83,7 @@ public class PipelineRunExecutor
                 case TaskInstance.TaskInstanceStatus.Completed:
                     stepInstance.Status = PipelineStepInstanceStatus.Completed;
                     stepInstance.CompletedAt = task.CompletedAt;
+                    stepInstance.ResultJson = task.ResultJson;
                     break;
 
                 case TaskInstance.TaskInstanceStatus.Failed:
@@ -149,12 +151,19 @@ public class PipelineRunExecutor
                     ? null
                     : JsonSerializer.Deserialize<Dictionary<string, string>>(snapshot.TargetTagsJson);
 
+                var effectiveParams = BuildEffectiveParams(
+                    run.RuntimeParamsJson,
+                    snapshot,
+                    stepsSnapshot,
+                    stepInstances,
+                    _logger);
+
                 dispatched = await _dispatch.DispatchAsync(
                     snapshot.TaskDefinitionId,
                     nodeId: snapshot.TargetNodeId,
                     strategy: strategy,
                     targetTags: targetTags,
-                    runtimeParamsJson: run.RuntimeParamsJson);
+                    runtimeParamsJson: effectiveParams);
             }
             catch (Exception ex)
             {
@@ -256,6 +265,92 @@ public class PipelineRunExecutor
         return true;
     }
 
+    /// <summary>
+    /// Merge the run-level runtime params with any output mappings declared
+    /// on <paramref name="snapshot"/>. Step-level mapped values win on
+    /// collision with run-level params.
+    /// </summary>
+    /// <summary>
+    /// Resolves the runtime params a step is dispatched with. Precedence, lowest
+    /// to highest: run-level params, per-step static params (P1-9), then output
+    /// mappings (live upstream values). Pure and logger-optional so it can be
+    /// unit-tested directly.
+    /// </summary>
+    internal static string? BuildEffectiveParams(
+        string? runRuntimeParamsJson,
+        StepSnapshot snapshot,
+        List<StepSnapshot> allSnapshots,
+        List<PipelineStepInstance> stepInstances,
+        ILogger? logger = null)
+    {
+        var hasStepParams = !string.IsNullOrWhiteSpace(snapshot.RuntimeParamsJson);
+        var hasMappings = snapshot.OutputMappings is { Count: > 0 };
+
+        // Fast path: nothing step-specific to merge.
+        if (!hasStepParams && !hasMappings)
+            return runRuntimeParamsJson;
+
+        // Precedence (lowest → highest): run params, then per-step static
+        // params (P1-9), then output mappings (live upstream values win). This
+        // is what lets two steps sharing a TaskDefinition be parameterized
+        // differently.
+        var merged = string.IsNullOrEmpty(runRuntimeParamsJson)
+            ? new JsonObject()
+            : JsonNode.Parse(runRuntimeParamsJson)?.AsObject() ?? new JsonObject();
+
+        if (hasStepParams)
+        {
+            var stepParams = JsonNode.Parse(snapshot.RuntimeParamsJson!)?.AsObject();
+            if (stepParams is not null)
+            {
+                foreach (var kv in stepParams)
+                    merged[kv.Key] = kv.Value?.DeepClone();
+            }
+        }
+
+        if (!hasMappings)
+            return merged.ToJsonString();
+
+        // Build lookup: step name → completed step instance (with ResultJson).
+        var completedByName = allSnapshots
+            .Join(stepInstances,
+                s => s.StepId,
+                i => i.PipelineStepId,
+                (s, i) => (s.Name, Instance: i))
+            .Where(x => x.Instance.Status == PipelineStepInstanceStatus.Completed)
+            .ToDictionary(x => x.Name, x => x.Instance, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var mapping in snapshot.OutputMappings!)
+        {
+            if (!completedByName.TryGetValue(mapping.FromStep, out var upstream))
+            {
+                logger?.LogDebug(
+                    "Output mapping fromStep '{FromStep}' not found or not completed; skipping",
+                    mapping.FromStep);
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(upstream.ResultJson)) continue;
+
+            JsonElement resultDoc;
+            try { resultDoc = JsonSerializer.Deserialize<JsonElement>(upstream.ResultJson); }
+            catch (JsonException) { continue; }
+
+            var extracted = OutputMappingPathExtractor.Extract(resultDoc, mapping.FromPath);
+            if (extracted is null)
+            {
+                logger?.LogDebug(
+                    "Output mapping path '{FromPath}' not found in step '{FromStep}' result; skipping",
+                    mapping.FromPath, mapping.FromStep);
+                continue;
+            }
+
+            merged[mapping.ToParam] = JsonValue.Create(extracted);
+        }
+
+        return merged.ToJsonString();
+    }
+
     private static PipelineGraph BuildGraphFromSnapshot(List<StepSnapshot> snapshots)
     {
         // The graph wants PipelineStep entities — build minimal stand-ins.
@@ -270,6 +365,9 @@ public class PipelineRunExecutor
             TargetNodeId = s.TargetNodeId,
             TargetTagsJson = s.TargetTagsJson,
             FailurePolicy = s.FailurePolicy,
+            OutputMappingsJson = s.OutputMappings is { Count: > 0 }
+                ? JsonSerializer.Serialize(s.OutputMappings)
+                : null,
         }).ToList();
         return PipelineGraph.Build(steps);
     }
@@ -287,5 +385,7 @@ public class PipelineRunExecutor
         DispatchStrategy? Strategy,
         Guid? TargetNodeId,
         string? TargetTagsJson,
-        StepFailurePolicy FailurePolicy);
+        StepFailurePolicy FailurePolicy,
+        List<OutputMapping>? OutputMappings = null,
+        string? RuntimeParamsJson = null);
 }

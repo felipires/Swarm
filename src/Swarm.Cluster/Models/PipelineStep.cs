@@ -42,5 +42,24 @@ public class PipelineStep
     /// <summary>Stable sort key for UI presentation. Not used for execution.</summary>
     public int Order { get; set; }
 
+    /// <summary>
+    /// JSON-encoded <c>OutputMapping[]</c> (P1-8). Before this step is
+    /// dispatched, the executor walks each mapping, extracts a value from
+    /// the named upstream step's <c>ResultJson</c>, and injects it into this
+    /// step's runtime params under <see cref="OutputMapping.ToParam"/>.
+    /// Null / empty array = no mappings.
+    /// </summary>
+    public string? OutputMappingsJson { get; set; }
+
+    /// <summary>
+    /// JSON-encoded literal runtime params authored on this step (P1-9). Lets
+    /// two steps that share a <see cref="TaskDefinitionId"/> be parameterized
+    /// differently — e.g. the same <c>http@1</c> handler hitting different
+    /// endpoints via <c>{param:endpoint}</c>. Merge precedence at dispatch is
+    /// run params (base) &lt; these step params &lt; output mappings (live upstream
+    /// values win). Null / empty = no per-step params.
+    /// </summary>
+    public string? RuntimeParamsJson { get; set; }
+
     public Pipeline Pipeline { get; set; } = null!;
 }

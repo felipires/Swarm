@@ -101,6 +101,29 @@ public sealed class PipelineGraph
     }
 
     /// <summary>
+    /// Transitive ancestors of <paramref name="stepId"/> — every step that
+    /// must complete (directly or transitively) before it runs.
+    /// </summary>
+    public IReadOnlySet<Guid> Ancestors(Guid stepId)
+    {
+        if (!_byId.ContainsKey(stepId)) return new HashSet<Guid>();
+
+        var result = new HashSet<Guid>();
+        var queue = new Queue<Guid>();
+        queue.Enqueue(stepId);
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!_byId.TryGetValue(current, out var node)) continue;
+            foreach (var dep in node.DependsOn)
+            {
+                if (result.Add(dep)) queue.Enqueue(dep);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Transitive descendants of <paramref name="stepId"/> — every step whose
     /// dependency chain leads back to it. Used when a step fails with
     /// <see cref="StepFailurePolicy.FailPipeline"/> to compute which

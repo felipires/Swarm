@@ -3,6 +3,7 @@ import type {
   DispatchStrategy,
   DraftPipelineStep,
   FailurePolicy,
+  OutputMapping,
 } from "../../../store/store";
 
 export interface StepNodeData {
@@ -14,6 +15,10 @@ export interface StepNodeData {
   /** Set when strategy === "TaggedNodes". */
   targetTags: Record<string, string>;
   failurePolicy: FailurePolicy;
+  /** P1-8: extract upstream results into this step's runtime params. */
+  outputMappings: OutputMapping[];
+  /** P1-9: literal per-step params, edited as raw JSON text. */
+  runtimeParamsRaw: string;
   [key: string]: unknown;
 }
 
@@ -47,6 +52,21 @@ export function wouldCycle(edges: Edge[], source: string, target: string): boole
   return false;
 }
 
+/** Parses a step's raw params text. ok=true with undefined value means "empty",
+ *  ok=false means malformed (not a JSON object). */
+export function parseStepParams(
+  raw: string,
+): { ok: true; value?: Record<string, unknown> } | { ok: false } {
+  if (!raw || raw.trim() === "") return { ok: true, value: undefined };
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
+    return { ok: true, value: parsed };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export function validateGraph(nodes: StepFlowNode[]): ValidationResult {
   const errors: string[] = [];
   if (nodes.length === 0) {
@@ -75,6 +95,10 @@ export function validateGraph(nodes: StepFlowNode[]): ValidationResult {
     )
   ) {
     errors.push("Steps targeting tagged nodes need at least one tag.");
+  }
+
+  if (nodes.some((n) => !parseStepParams(n.data.runtimeParamsRaw ?? "").ok)) {
+    errors.push("A step's params are not a valid JSON object.");
   }
 
   return { ok: errors.length === 0, errors };
@@ -124,5 +148,12 @@ export function graphToSteps(
         : null,
     failurePolicy: n.data.failurePolicy,
     order: depth.get(n.id) ?? 0,
+    outputMappings: (n.data.outputMappings ?? []).filter(
+      (m) => m.fromStep && m.toParam,
+    ),
+    runtimeParams: (() => {
+      const parsed = parseStepParams(n.data.runtimeParamsRaw ?? "");
+      return parsed.ok ? parsed.value ?? null : null;
+    })(),
   }));
 }

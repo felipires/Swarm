@@ -31,7 +31,9 @@ public class PipelineService
         Guid? TargetNodeId = null,
         Dictionary<string, string>? TargetTags = null,
         StepFailurePolicy FailurePolicy = StepFailurePolicy.FailPipeline,
-        int Order = 0);
+        int Order = 0,
+        List<OutputMapping>? OutputMappings = null,
+        string? RuntimeParamsJson = null);
 
     /// <summary>
     /// Create a new pipeline. Step IDs are generated server-side; the
@@ -85,12 +87,36 @@ public class PipelineService
                 TargetTagsJson = s.TargetTags is { Count: > 0 } ? JsonSerializer.Serialize(s.TargetTags) : null,
                 FailurePolicy = s.FailurePolicy,
                 Order = s.Order,
+                OutputMappingsJson = s.OutputMappings is { Count: > 0 }
+                    ? JsonSerializer.Serialize(s.OutputMappings)
+                    : null,
+                RuntimeParamsJson = string.IsNullOrWhiteSpace(s.RuntimeParamsJson)
+                    ? null
+                    : s.RuntimeParamsJson,
             });
         }
 
-        // Validate the assembled graph (cycles, self-loops, etc.) before
-        // committing anything.
-        _ = PipelineGraph.Build(stepEntities);
+        // Validate the assembled graph (cycles, self-loops, etc.) and build
+        // it once so ancestor validation below can reuse it.
+        var graph = PipelineGraph.Build(stepEntities);
+
+        // Validate output mapping ancestor constraint: fromStep must be a
+        // transitive ancestor of the step declaring the mapping.
+        foreach (var s in steps)
+        {
+            if (s.OutputMappings is not { Count: > 0 }) continue;
+            var stepId = nameToId[s.Name];
+            var ancestors = graph.Ancestors(stepId);
+            foreach (var mapping in s.OutputMappings)
+            {
+                if (!nameToId.TryGetValue(mapping.FromStep, out var fromId))
+                    throw new PipelineGraphException("STEP_OUTPUT_NOT_ANCESTOR",
+                        $"Step '{s.Name}' output mapping references unknown step '{mapping.FromStep}'");
+                if (!ancestors.Contains(fromId))
+                    throw new PipelineGraphException("STEP_OUTPUT_NOT_ANCESTOR",
+                        $"Step '{s.Name}' output mapping references '{mapping.FromStep}' which is not an ancestor");
+            }
+        }
 
         var pipeline = new Pipeline
         {
@@ -162,7 +188,11 @@ public class PipelineService
             Strategy: s.StrategyOverride,
             TargetNodeId: s.TargetNodeId,
             TargetTagsJson: s.TargetTagsJson,
-            FailurePolicy: s.FailurePolicy)).ToList();
+            FailurePolicy: s.FailurePolicy,
+            OutputMappings: string.IsNullOrEmpty(s.OutputMappingsJson)
+                ? null
+                : JsonSerializer.Deserialize<List<OutputMapping>>(s.OutputMappingsJson),
+            RuntimeParamsJson: s.RuntimeParamsJson)).ToList();
 
         var run = new PipelineRun
         {

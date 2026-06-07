@@ -37,6 +37,30 @@ const edgeOptions = {
 
 let stepCounter = 0;
 
+/** Names of all transitive ancestor steps of `selectedId`, walking edges upward.
+ *  These are the only steps whose output a step may map from (P1-8). */
+function ancestorNames(
+  selectedId: string,
+  nodes: StepFlowNode[],
+  edges: Edge[],
+): string[] {
+  const visited = new Set<string>();
+  const queue = [selectedId];
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const e of edges) {
+      if (e.target === id && !visited.has(e.source)) {
+        visited.add(e.source);
+        queue.push(e.source);
+      }
+    }
+  }
+  return nodes
+    .filter((n) => visited.has(n.id))
+    .map((n) => n.data.name.trim())
+    .filter(Boolean);
+}
+
 function newStep(position: { x: number; y: number }): StepFlowNode {
   stepCounter += 1;
   return {
@@ -50,6 +74,8 @@ function newStep(position: { x: number; y: number }): StepFlowNode {
       targetNodeId: null,
       targetTags: {},
       failurePolicy: "FailPipeline",
+      outputMappings: [],
+      runtimeParamsRaw: "",
     } satisfies StepNodeData,
   };
 }
@@ -235,13 +261,14 @@ function EditorInner() {
           )}
         </div>
 
-        <aside className="w-72 shrink-0 overflow-y-auto border-l border-[var(--swarm-border)] bg-[var(--swarm-surface)] p-4">
+        <aside className="w-2/6 shrink-0 overflow-y-auto border-l border-[var(--swarm-border)] bg-[var(--swarm-surface)] p-4">
           {selected ? (
             <StepInspector
               key={selected.id}
               data={selected.data}
               tasks={tasks}
               nodes={clusterNodes}
+              ancestorNames={ancestorNames(selected.id, nodes, edges)}
               onChange={patchSelected}
               onDelete={deleteSelected}
             />

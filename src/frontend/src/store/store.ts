@@ -61,6 +61,17 @@ export type DispatchStrategy =
 
 export type FailurePolicy = "FailPipeline" | "ContinuePipeline";
 
+/** P1-8: extracts a value from an upstream step's result JSON and injects it as
+ *  a runtime param into this step before dispatch. */
+export interface OutputMapping {
+  /** Name of an upstream (ancestor) step. */
+  fromStep: string;
+  /** Dot/bracket path into that step's result JSON, e.g. `rows[0].email`. */
+  fromPath: string;
+  /** Runtime param key the extracted value is injected as. */
+  toParam: string;
+}
+
 /** Read model — matches PipelineStepResponse. `dependsOn` holds step IDs (Guid)
  *  and `strategyOverride` is null when the step inherits the default strategy. */
 export interface PipelineStep {
@@ -73,6 +84,9 @@ export interface PipelineStep {
   targetTagsJson?: string | null;
   failurePolicy: FailurePolicy;
   taskDefinitionId: string;
+  outputMappings?: OutputMapping[] | null;
+  /** P1-9: literal params authored on this step (JSON string). */
+  runtimeParamsJson?: string | null;
 }
 
 export interface Pipeline {
@@ -95,6 +109,9 @@ export interface DraftPipelineStep {
   targetTags?: Record<string, string> | null;
   failurePolicy: FailurePolicy;
   order: number;
+  outputMappings?: OutputMapping[];
+  /** P1-9: literal per-step params; serialized to RuntimeParamsJson server-side. */
+  runtimeParams?: Record<string, unknown> | null;
 }
 
 export interface CreatePipelineRequest {
@@ -129,6 +146,7 @@ export interface PipelineStepInstance {
   dispatchedAt?: string;
   completedAt?: string;
   errorMessage?: string;
+  resultJson?: string | null;
 }
 
 export type PipelineRunStatus = "Running" | "Completed" | "Failed" | "Cancelled";

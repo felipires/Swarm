@@ -48,7 +48,11 @@ public class PipelinesController : ControllerBase
                 TargetNodeId: s.TargetNodeId,
                 TargetTags: s.TargetTags,
                 FailurePolicy: s.FailurePolicy,
-                Order: s.Order)).ToList();
+                Order: s.Order,
+                OutputMappings: s.OutputMappings,
+                RuntimeParamsJson: s.RuntimeParams is { ValueKind: System.Text.Json.JsonValueKind.Object }
+                    ? s.RuntimeParams.Value.GetRawText()
+                    : null)).ToList();
             var pipeline = await _service.CreateAsync(req.Name, req.Description, stepDefs, cancellationToken);
             return CreatedAtAction(nameof(Get), new { id = pipeline.Id }, PipelineResponse.From(pipeline));
         }
@@ -274,7 +278,9 @@ public record CreatePipelineStep(
     Guid? TargetNodeId = null,
     Dictionary<string, string>? TargetTags = null,
     StepFailurePolicy FailurePolicy = StepFailurePolicy.FailPipeline,
-    int Order = 0);
+    int Order = 0,
+    List<OutputMapping>? OutputMappings = null,
+    System.Text.Json.JsonElement? RuntimeParams = null);
 
 public record StartPipelineRunRequest(
     System.Text.Json.JsonElement? RuntimeParams = null,
@@ -313,6 +319,8 @@ public class PipelineStepResponse
     public string? TargetTagsJson { get; init; }
     public StepFailurePolicy FailurePolicy { get; init; }
     public int Order { get; init; }
+    public List<OutputMapping>? OutputMappings { get; init; }
+    public string? RuntimeParamsJson { get; init; }
 
     public static PipelineStepResponse From(PipelineStep s) => new()
     {
@@ -325,6 +333,10 @@ public class PipelineStepResponse
         TargetTagsJson = s.TargetTagsJson,
         FailurePolicy = s.FailurePolicy,
         Order = s.Order,
+        OutputMappings = string.IsNullOrEmpty(s.OutputMappingsJson)
+            ? null
+            : System.Text.Json.JsonSerializer.Deserialize<List<OutputMapping>>(s.OutputMappingsJson),
+        RuntimeParamsJson = s.RuntimeParamsJson,
     };
 }
 
@@ -363,6 +375,7 @@ public class PipelineStepInstanceResponse
     public DateTime? DispatchedAt { get; init; }
     public DateTime? CompletedAt { get; init; }
     public string? ErrorMessage { get; init; }
+    public string? ResultJson { get; init; }
 
     public static PipelineStepInstanceResponse From(PipelineStepInstance s) => new()
     {
@@ -375,5 +388,6 @@ public class PipelineStepInstanceResponse
         DispatchedAt = s.DispatchedAt,
         CompletedAt = s.CompletedAt,
         ErrorMessage = s.ErrorMessage,
+        ResultJson = s.ResultJson,
     };
 }

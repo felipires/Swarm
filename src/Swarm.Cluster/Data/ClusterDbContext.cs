@@ -165,6 +165,7 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
             entity.Property(e => e.DependsOnJson).IsRequired().HasColumnType("jsonb").HasDefaultValue("[]");
             entity.Property(e => e.FailurePolicy).IsRequired();
+            entity.Property(e => e.OutputMappingsJson).HasColumnType("jsonb");
             entity.HasIndex(e => new { e.PipelineId, e.Name }).IsUnique();
             entity.HasOne(e => e.Pipeline)
                   .WithMany(p => p.Steps)
@@ -199,6 +200,7 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
             entity.HasIndex(e => new { e.PipelineRunId, e.Status });
             entity.HasIndex(e => e.TaskInstanceId).IsUnique().HasFilter("\"TaskInstanceId\" IS NOT NULL");
+            entity.Property(e => e.ResultJson).HasColumnType("jsonb");
             entity.HasOne<PipelineRun>()
                   .WithMany()
                   .HasForeignKey(e => e.PipelineRunId)
