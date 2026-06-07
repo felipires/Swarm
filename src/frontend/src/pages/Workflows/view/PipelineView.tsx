@@ -236,7 +236,7 @@ export function PipelineView() {
 
         {drawerOpen && pipeline && (
           <aside
-            className="flex w-2/6 shrink-0 flex-col overflow-hidden border-l border-[var(--swarm-border)] bg-[var(--swarm-surface)]"
+            className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-[var(--swarm-border)] bg-[var(--swarm-surface)]"
             aria-label="Run history"
           >
             <div className="flex items-center justify-between border-b border-[var(--swarm-border)] px-4 py-2.5">
