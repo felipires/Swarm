@@ -72,6 +72,33 @@ public class ResolverIntegrationTests : IDisposable
             "the :secret modifier must mark the resolved value for downstream redaction");
     }
 
+    /// <summary>
+    /// Simulates the output-mapping scenario: n1 and n2 are injected into
+    /// runtime params by BuildEffectiveParams, and the query param references
+    /// them via {param:n1}/{param:n2}. The pre-pass in TaskExecutorService
+    /// (ResolveParamSelfReferences) must expand those before config interpolation.
+    /// </summary>
+    [Fact]
+    public void Pipeline_ParamSelfReference_ExpandedBeforeConfigInterpolation()
+    {
+        // Simulate what BuildEffectiveParams produces after output mappings:
+        // query contains {param:n1}/{param:n2}, n1 and n2 are injected values.
+        var rawParams = """{"query":"SELECT {param:n1} + {param:n2};","n1":"10","n2":"20"}""";
+
+        // Apply the same self-resolution that TaskExecutorService does.
+        var paramsDoc = JsonDocument.Parse(rawParams);
+        var lookup = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var prop in paramsDoc.RootElement.EnumerateObject())
+            if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                lookup[prop.Name] = prop.Value.GetString()!;
+
+        var resolvedQuery = Swarm.Sdk.ValueResolution.PlaceholderParser.ExpandParamRefs(
+            paramsDoc.RootElement.GetProperty("query").GetString()!, lookup);
+
+        resolvedQuery.Should().Be("SELECT 10 + 20;",
+            "output-mapped values should be substituted into other param strings before dispatch");
+    }
+
     private void SetEnv(string key, string value)
     {
         Environment.SetEnvironmentVariable(key, value);

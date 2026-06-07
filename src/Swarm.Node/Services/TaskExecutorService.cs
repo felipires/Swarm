@@ -259,6 +259,10 @@ public class TaskExecutorService : IAsyncDisposable
             try
             {
                 runtimeParams = JsonSerializer.Deserialize<JsonElement>(message.RuntimeParamsJson);
+                // One-level self-resolution: expand {param:X} references within
+                // string-valued params so output-mapped values can be embedded in
+                // other param strings (e.g. "SELECT {param:n1} + {param:n2};").
+                runtimeParams = ResolveParamSelfReferences(runtimeParams);
             }
             catch (JsonException ex)
             {
@@ -284,6 +288,44 @@ public class TaskExecutorService : IAsyncDisposable
         // are scrubbed from any log event emitted before the scope ends.
         using var redactionScope = SecretRedactionContext.Push(pipeline);
         return await handler.HandleAsync(context);
+    }
+
+    /// <summary>
+    /// One-level self-resolution of runtime params: for each string-valued
+    /// property, expand any {param:KEY} placeholders using the other values in
+    /// the same params object. This lets output-mapped values be composed into
+    /// param strings before the config template is interpolated.
+    /// </summary>
+    private static JsonElement ResolveParamSelfReferences(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return root;
+
+        // Build a plain string lookup first (only top-level string values resolve).
+        var lookup = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == JsonValueKind.String)
+                lookup[prop.Name] = prop.Value.GetString() ?? string.Empty;
+        }
+
+        var writer = new System.Text.Json.Nodes.JsonObject();
+        bool anyChanged = false;
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (prop.Value.ValueKind != JsonValueKind.String)
+            {
+                writer[prop.Name] = System.Text.Json.Nodes.JsonNode.Parse(prop.Value.GetRawText());
+                continue;
+            }
+
+            var raw = prop.Value.GetString() ?? string.Empty;
+            var resolved = PlaceholderParser.ExpandParamRefs(raw, lookup);
+            writer[prop.Name] = resolved;
+            if (!string.Equals(resolved, raw, StringComparison.Ordinal)) anyChanged = true;
+        }
+
+        if (!anyChanged) return root;
+        return JsonSerializer.Deserialize<JsonElement>(writer.ToJsonString());
     }
 
     private async Task<Guid> SaveLocalTaskAsync(TaskMessage message)

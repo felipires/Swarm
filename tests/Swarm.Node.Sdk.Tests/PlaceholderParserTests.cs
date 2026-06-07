@@ -66,4 +66,56 @@ public class PlaceholderParserTests
 
         template.Substring(p.Start, p.Length).Should().Be("{env:X}");
     }
+
+    // --- ExpandParamRefs ---
+
+    [Fact]
+    public void ExpandParamRefs_ReplacesKnownParamPlaceholders()
+    {
+        var lookup = new Dictionary<string, string> { ["n1"] = "10", ["n2"] = "20" };
+
+        var result = PlaceholderParser.ExpandParamRefs("SELECT {param:n1} + {param:n2};", lookup);
+
+        result.Should().Be("SELECT 10 + 20;");
+    }
+
+    [Fact]
+    public void ExpandParamRefs_LeavesUnknownKeysUntouched()
+    {
+        var lookup = new Dictionary<string, string> { ["n1"] = "10" };
+
+        var result = PlaceholderParser.ExpandParamRefs("SELECT {param:n1} + {param:n2};", lookup);
+
+        result.Should().Be("SELECT 10 + {param:n2};");
+    }
+
+    [Fact]
+    public void ExpandParamRefs_IgnoresNonParamSources()
+    {
+        var lookup = new Dictionary<string, string> { ["KEY"] = "value" };
+
+        var result = PlaceholderParser.ExpandParamRefs("{env:KEY} and {config:KEY}", lookup);
+
+        result.Should().Be("{env:KEY} and {config:KEY}");
+    }
+
+    [Fact]
+    public void ExpandParamRefs_EmptyOrNoPlaceholders_ReturnsSameString()
+    {
+        var lookup = new Dictionary<string, string> { ["x"] = "1" };
+
+        PlaceholderParser.ExpandParamRefs("", lookup).Should().Be("");
+        PlaceholderParser.ExpandParamRefs("no placeholders here", lookup).Should().Be("no placeholders here");
+    }
+
+    [Fact]
+    public void ExpandParamRefs_DoesNotRecurse()
+    {
+        // Value contains another {param:...} — should not be expanded a second time.
+        var lookup = new Dictionary<string, string> { ["a"] = "{param:b}", ["b"] = "final" };
+
+        var result = PlaceholderParser.ExpandParamRefs("{param:a}", lookup);
+
+        result.Should().Be("{param:b}");
+    }
 }

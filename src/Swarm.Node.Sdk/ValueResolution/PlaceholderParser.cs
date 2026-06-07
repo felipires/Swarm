@@ -21,6 +21,24 @@ public static partial class PlaceholderParser
     [GeneratedRegex(@"\{(?<source>[a-z][a-z0-9_]*)\s*:\s*(?<key>[A-Za-z0-9_.\-]+)(?<mods>(?::[^\{\}:]+)*)\}", RegexOptions.Compiled)]
     internal static partial Regex PlaceholderRegex();
 
+    /// <summary>
+    /// Expand <c>{param:KEY}</c> references in <paramref name="template"/>
+    /// using <paramref name="lookup"/>. Non-param sources and unknown keys are
+    /// left as-is. Used for one-level self-resolution of runtime params.
+    /// </summary>
+    public static string ExpandParamRefs(string template, IReadOnlyDictionary<string, string> lookup)
+    {
+        if (string.IsNullOrEmpty(template) || !template.Contains("{param:", StringComparison.Ordinal))
+            return template;
+
+        return PlaceholderRegex().Replace(template, m =>
+        {
+            if (m.Groups["source"].Value != "param") return m.Value;
+            var key = m.Groups["key"].Value;
+            return lookup.TryGetValue(key, out var val) ? val : m.Value;
+        });
+    }
+
     public static IReadOnlyList<Placeholder> Extract(string template)
     {
         var result = new List<Placeholder>();
