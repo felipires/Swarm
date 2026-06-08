@@ -8,8 +8,10 @@ export const queryKeys = {
   taskInstances: (taskId: string) => ["tasks", taskId, "instances"] as const,
   pipelines: ["pipelines"] as const,
   pipeline: (id: string) => ["pipelines", id] as const,
+  pipelineVersions: (id: string) => ["pipelines", id, "versions"] as const,
   pipelineRuns: (pipelineId: string) => ["pipelines", pipelineId, "runs"] as const,
   pipelineRunSteps: (runId: string) => ["pipelines", "runs", runId, "steps"] as const,
   taskInstance: (instanceId: string) => ["tasks", "instances", instanceId] as const,
+  taskVersions: (id: string) => ["tasks", id, "versions"] as const,
   pipelineSchedules: (pipelineId: string) => ["pipelines", pipelineId, "schedules"] as const,
 };

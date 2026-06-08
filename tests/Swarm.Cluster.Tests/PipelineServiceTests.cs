@@ -138,7 +138,7 @@ public class PipelineServiceTests
         // own tests). Dispatch will write the outbox row regardless.
         var dispatch = new TaskDispatchService(db, NullLogger<TaskDispatchService>.Instance);
         var executor = new PipelineRunExecutor(db, dispatch, NullLogger<PipelineRunExecutor>.Instance);
-        var svc = new PipelineService(db, executor, NullLogger<PipelineService>.Instance);
+        var svc = new PipelineService(db, executor, new EntityVersionService(db), NullLogger<PipelineService>.Instance);
 
         Guid? nodeId = null;
         if (seedOnlineNode)

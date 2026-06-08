@@ -62,6 +62,7 @@ builder.Services.AddSingleton<IConnection>(_ =>
 builder.Services.AddScoped<Swarm.Cluster.Services.Tags.ITagMatchStrategy,
     Swarm.Cluster.Services.Tags.PostgresJsonbTagMatcher>();
 builder.Services.AddScoped<NodeService>();
+builder.Services.AddScoped<EntityVersionService>();
 builder.Services.AddScoped<TaskDispatchService>();
 builder.Services.AddScoped<Swarm.Cluster.Validation.DispatchValidator>();
 

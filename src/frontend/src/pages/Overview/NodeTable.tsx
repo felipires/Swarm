@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { IconChevron } from "../../components/shell/icons";
-import { ConfirmDeleteButton } from "../../components/ui/ConfirmDeleteButton";
+import { ConfirmNameDialog } from "../../components/ui/ConfirmNameDialog";
 import { MeterBar } from "../../components/ui/MeterBar";
 import { StatusPill, type StatusTone } from "../../components/ui/StatusPill";
 import { isStale } from "../../hooks/useClusterPulse";
@@ -65,6 +65,7 @@ interface NodeRowProps {
 function NodeRow({ node, now, onDelete, deleting }: NodeRowProps) {
   const state = nodeState(node, now);
   const [expanded, setExpanded] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const panelId = useId();
   const metrics = node.latestMetrics ?? null;
   const memPct = metrics
@@ -139,13 +140,42 @@ function NodeRow({ node, now, onDelete, deleting }: NodeRowProps) {
           <TagChips tags={node.effectiveTags} />
         </td>
         <td className="px-3 py-2 text-right">
-          <ConfirmDeleteButton
-            onConfirm={() => onDelete(node)}
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
             disabled={deleting}
-            label={`Remove node ${node.name}`}
-          />
+            aria-label={`Remove node ${node.name}`}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[var(--swarm-muted)] transition-colors hover:bg-[var(--swarm-danger-subtle)] hover:text-[var(--swarm-danger)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)] disabled:opacity-40"
+            style={{ transitionDuration: "var(--swarm-duration)" }}
+          >
+            <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3.5 5h11M7 5V3.5h4V5M5 5l.6 9a1 1 0 001 1h4.8a1 1 0 001-1L13 5" />
+              <path d="M7.5 7.5v5M10.5 7.5v5" />
+            </svg>
+          </button>
         </td>
       </tr>
+      {confirming && (
+        <tr>
+          <td className="p-0">
+            <ConfirmNameDialog
+              name={node.name}
+              title="Remove node"
+              confirmLabel="Remove node"
+              pending={deleting}
+              onConfirm={() => {
+                onDelete(node);
+                setConfirming(false);
+              }}
+              onClose={() => setConfirming(false)}
+            >
+              This permanently removes the node and its tags, capabilities, and
+              pending env operations. This cannot be undone. (The worker process keeps
+              running; it re-registers on its next heartbeat.)
+            </ConfirmNameDialog>
+          </td>
+        </tr>
+      )}
       {expanded && (
         <tr>
           <td colSpan={9} className="p-0" id={panelId}>

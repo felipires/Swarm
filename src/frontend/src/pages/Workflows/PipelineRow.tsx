@@ -2,9 +2,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { IconChevron } from "../../components/shell/icons";
+import { ConfirmDeleteButton } from "../../components/ui/ConfirmDeleteButton";
+import { VersionBadge } from "../../components/ui/VersionBadge";
 import { apiClient } from "../../services/api";
 import { queryKeys } from "../../services/queryKeys";
 import type { Pipeline } from "../../store/store";
+import { parseParamsWithPlaceholders } from "../../utils/placeholderJson";
 import { RunHistory } from "./RunHistory";
 import { ScheduleChip } from "./ScheduleChip";
 import { SchedulesPanel } from "./SchedulesPanel";
@@ -28,24 +31,7 @@ interface PipelineRowProps {
   pipeline: Pipeline;
 }
 
-function parseParams(
-  raw: string,
-): { ok: true; value?: Record<string, unknown> } | { ok: false } {
-  if (raw.trim() === "") return { ok: true, value: undefined };
-  try {
-    const parsed = JSON.parse(raw);
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      Array.isArray(parsed)
-    ) {
-      return { ok: false };
-    }
-    return { ok: true, value: parsed };
-  } catch {
-    return { ok: false };
-  }
-}
+const parseParams = parseParamsWithPlaceholders;
 
 export function PipelineRow({ pipeline }: PipelineRowProps) {
   const navigate = useNavigate();
@@ -73,8 +59,44 @@ export function PipelineRow({ pipeline }: PipelineRowProps) {
     },
   });
 
+  const invalidateList = () => queryClient.invalidateQueries({ queryKey: queryKeys.pipelines });
+  const remove = useMutation({
+    mutationFn: () => apiClient.deletePipeline(pipeline.id),
+    onSuccess: invalidateList,
+  });
+  const undelete = useMutation({
+    mutationFn: () => apiClient.undeletePipeline(pipeline.id),
+    onSuccess: invalidateList,
+  });
+
   const paramsValid = parseParams(paramsRaw).ok;
   const stepCount = pipeline.steps.length;
+
+  if (pipeline.isDeleted) {
+    return (
+      <div className="flex items-center gap-3 border-b border-[var(--swarm-border)] px-4 py-3 last:border-b-0">
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="truncate font-medium text-[var(--swarm-muted)] line-through">
+              {pipeline.name}
+            </span>
+            <span className="rounded-full bg-[var(--swarm-danger-subtle)] px-1.5 py-0.5 text-xs font-medium text-[var(--swarm-danger)]">
+              deleted
+            </span>
+          </span>
+        </span>
+        <button
+          type="button"
+          onClick={() => undelete.mutate()}
+          disabled={undelete.isPending}
+          className="inline-flex shrink-0 items-center rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--swarm-ink)] transition-colors hover:bg-[var(--swarm-surface-raised)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)] disabled:opacity-60"
+          style={{ transitionDuration: "var(--swarm-duration)" }}
+        >
+          {undelete.isPending ? "Restoring…" : "Restore"}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="border-b border-[var(--swarm-border)] last:border-b-0">
@@ -102,6 +124,7 @@ export function PipelineRow({ pipeline }: PipelineRowProps) {
               <span className="truncate font-medium text-[var(--swarm-ink)]">
                 {pipeline.name}
               </span>
+              {pipeline.version != null && <VersionBadge version={pipeline.version} />}
               <ScheduleChip pipelineId={pipeline.id} />
             </span>
             {pipeline.description && (
@@ -127,6 +150,15 @@ export function PipelineRow({ pipeline }: PipelineRowProps) {
 
         <button
           type="button"
+          onClick={() => navigate(`/workflows/${pipeline.id}/edit`)}
+          className="inline-flex shrink-0 items-center rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--swarm-ink)] transition-colors hover:bg-[var(--swarm-surface-raised)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)]"
+          style={{ transitionDuration: "var(--swarm-duration)" }}
+        >
+          Edit
+        </button>
+
+        <button
+          type="button"
           onClick={() => {
             setExpanded(true);
             setParamsOpen(true);
@@ -138,6 +170,12 @@ export function PipelineRow({ pipeline }: PipelineRowProps) {
           <IconPlay />
           {run.isPending ? "Starting…" : "Run"}
         </button>
+
+        <ConfirmDeleteButton
+          onConfirm={() => remove.mutate()}
+          disabled={remove.isPending}
+          label={`Delete pipeline ${pipeline.name}`}
+        />
       </div>
 
       {expanded && (

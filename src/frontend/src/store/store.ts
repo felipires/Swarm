@@ -30,8 +30,23 @@ export interface TaskDefinition {
   name: string;
   description?: string;
   configJson: string;
+  /** Backend may include taskType/defaultStrategy; kept optional for the editor. */
+  taskType?: string;
+  defaultStrategy?: DispatchStrategy;
+  defaultTargetTagsJson?: string | null;
+  version?: number;
+  isDeleted?: boolean;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A version-history entry (P1-10). List responses omit `snapshot`; the
+ *  single-version endpoint includes it (the create-request-shaped definition). */
+export interface EntityVersionEntry {
+  version: number;
+  createdAt: string;
+  snapshot?: unknown;
 }
 
 export interface TaskInstance {
@@ -94,6 +109,8 @@ export interface Pipeline {
   name: string;
   description?: string;
   version: number;
+  isDeleted?: boolean;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   steps: PipelineStep[];

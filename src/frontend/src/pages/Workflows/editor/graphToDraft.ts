@@ -5,6 +5,7 @@ import type {
   FailurePolicy,
   OutputMapping,
 } from "../../../store/store";
+import { parseParamsWithPlaceholders } from "../../../utils/placeholderJson";
 
 export interface StepNodeData {
   name: string;
@@ -52,20 +53,9 @@ export function wouldCycle(edges: Edge[], source: string, target: string): boole
   return false;
 }
 
-/** Parses a step's raw params text. ok=true with undefined value means "empty",
- *  ok=false means malformed (not a JSON object). */
-export function parseStepParams(
-  raw: string,
-): { ok: true; value?: Record<string, unknown> } | { ok: false } {
-  if (!raw || raw.trim() === "") return { ok: true, value: undefined };
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-    return { ok: true, value: parsed };
-  } catch {
-    return { ok: false };
-  }
-}
+/** Parses a step's raw params text (placeholder-tolerant). ok=true with
+ *  undefined value means "empty"; ok=false means not a JSON object. */
+export const parseStepParams = parseParamsWithPlaceholders;
 
 export function validateGraph(nodes: StepFlowNode[]): ValidationResult {
   const errors: string[] = [];

@@ -5,6 +5,7 @@ import { isStale } from "../../hooks/useClusterPulse";
 import { apiClient } from "../../services/api";
 import { queryKeys } from "../../services/queryKeys";
 import type { DispatchRequest, DispatchStrategy } from "../../store/store";
+import { parseParamsWithPlaceholders } from "../../utils/placeholderJson";
 import { STRATEGY_LABEL } from "../Workflows/pipelineGraph";
 
 interface DispatchControlProps {
@@ -23,16 +24,7 @@ const STRATEGIES: DispatchStrategy[] = [
 const fieldClass =
   "rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-bg)] px-2 py-2 text-sm text-[var(--swarm-ink)] focus:border-[var(--swarm-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--swarm-primary)]/25 disabled:opacity-60";
 
-function parseParams(raw: string): { ok: true; value?: Record<string, unknown> } | { ok: false } {
-  if (raw.trim() === "") return { ok: true, value: undefined };
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false };
-    return { ok: true, value: parsed };
-  } catch {
-    return { ok: false };
-  }
-}
+const parseParams = parseParamsWithPlaceholders;
 
 export function DispatchControl({ taskId }: DispatchControlProps) {
   const queryClient = useQueryClient();
@@ -66,24 +58,34 @@ export function DispatchControl({ taskId }: DispatchControlProps) {
     },
     onSuccess: () => {
       setFeedback({ tone: "ok", text: "Dispatched." });
-      queryClient.invalidateQueries({ queryKey: queryKeys.taskInstances(taskId) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.taskInstances(taskId),
+      });
     },
     onError: () =>
-      setFeedback({ tone: "error", text: "Dispatch failed. The cluster rejected the request." }),
+      setFeedback({
+        tone: "error",
+        text: "Dispatch failed. The cluster rejected the request.",
+      }),
   });
 
   const paramsValid = parseParams(paramsRaw).ok;
-  const targetValid =
-    strategy !== "SpecificNode" || nodeId !== "";
+  const targetValid = strategy !== "SpecificNode" || nodeId !== "";
   const tagsValid = strategy !== "TaggedNodes" || Object.keys(tags).length > 0;
   const canDispatch =
-    paramsValid && targetValid && tagsValid && !dispatch.isPending && onlineNodes.length > 0;
+    paramsValid &&
+    targetValid &&
+    tagsValid &&
+    !dispatch.isPending &&
+    onlineNodes.length > 0;
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-[var(--swarm-muted)]">Strategy</span>
+          <span className="text-xs font-medium text-[var(--swarm-muted)]">
+            Strategy
+          </span>
           <select
             value={strategy}
             onChange={(e) => setStrategy(e.target.value as DispatchStrategy)}
@@ -100,7 +102,9 @@ export function DispatchControl({ taskId }: DispatchControlProps) {
 
         {strategy === "SpecificNode" && (
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-[var(--swarm-muted)]">Node</span>
+            <span className="text-xs font-medium text-[var(--swarm-muted)]">
+              Node
+            </span>
             <select
               value={nodeId}
               onChange={(e) => setNodeId(e.target.value)}
@@ -108,7 +112,9 @@ export function DispatchControl({ taskId }: DispatchControlProps) {
               aria-label="Target node"
             >
               <option value="" disabled>
-                {onlineNodes.length === 0 ? "No online nodes" : "Select a node…"}
+                {onlineNodes.length === 0
+                  ? "No online nodes"
+                  : "Select a node…"}
               </option>
               {onlineNodes.map((n) => (
                 <option key={n.id} value={n.id}>
@@ -127,13 +133,18 @@ export function DispatchControl({ taskId }: DispatchControlProps) {
           </span>
           <TagMapEditor value={tags} onChange={setTags} />
           {!tagsValid && (
-            <p className="mt-1 text-xs text-[var(--swarm-muted)]">Add at least one tag.</p>
+            <p className="mt-1 text-xs text-[var(--swarm-muted)]">
+              Add at least one tag.
+            </p>
           )}
         </div>
       )}
 
       <div>
-        <label htmlFor={`params-${taskId}`} className="mb-1 block text-xs font-medium text-[var(--swarm-muted)]">
+        <label
+          htmlFor={`params-${taskId}`}
+          className="mb-1 block text-xs font-medium text-[var(--swarm-muted)]"
+        >
           Runtime params <span className="font-normal">(JSON, optional)</span>
         </label>
         <textarea
@@ -164,7 +175,9 @@ export function DispatchControl({ taskId }: DispatchControlProps) {
           {dispatch.isPending ? "Dispatching…" : "Dispatch"}
         </button>
         {onlineNodes.length === 0 && (
-          <span className="text-sm text-[var(--swarm-muted)]">No online nodes to dispatch to.</span>
+          <span className="text-sm text-[var(--swarm-muted)]">
+            No online nodes to dispatch to.
+          </span>
         )}
         {feedback && (
           <span

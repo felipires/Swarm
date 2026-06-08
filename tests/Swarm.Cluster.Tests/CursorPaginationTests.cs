@@ -187,7 +187,7 @@ public class CursorPaginationTests
     private static TasksController BuildController(ClusterDbContext db)
     {
         var dispatch = new TaskDispatchService(db, NullLogger<TaskDispatchService>.Instance);
-        return new TasksController(db, dispatch, NullLogger<TasksController>.Instance);
+        return new TasksController(db, dispatch, new EntityVersionService(db), NullLogger<TasksController>.Instance);
     }
 
     private static ClusterDbContext BuildDb()

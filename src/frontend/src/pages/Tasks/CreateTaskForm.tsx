@@ -1,11 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { TagMapEditor } from "../../components/ui/TagMapEditor";
 import { apiClient } from "../../services/api";
 import { queryKeys } from "../../services/queryKeys";
-import { toSpecs, validateConfig, type TaskTypeSpec } from "./taskTypes";
+import type { DispatchStrategy, TaskDefinition } from "../../store/store";
+import { STRATEGY_LABEL } from "../Workflows/pipelineGraph";
+import {
+  parseConfigWithPlaceholders,
+  toSpecs,
+  validateConfig,
+  type TaskTypeSpec,
+} from "./taskTypes";
+
+const STRATEGIES: DispatchStrategy[] = [
+  "AnyOnlineNode",
+  "SpecificNode",
+  "AllOnlineNodes",
+  "TaggedNodes",
+];
 
 interface CreateTaskFormProps {
   onClose: () => void;
+  /** When provided, the form edits this task (PUT) instead of creating. */
+  task?: TaskDefinition;
 }
 
 interface ConfigCheck {
@@ -15,18 +32,20 @@ interface ConfigCheck {
 
 function checkConfig(value: string, spec: TaskTypeSpec | undefined): ConfigCheck {
   if (value.trim() === "") return { jsonError: "Config is required.", schemaErrors: [] };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
+  const parsed = parseConfigWithPlaceholders(value);
+  if (!parsed.ok) {
     return { jsonError: "Config must be valid JSON.", schemaErrors: [] };
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  if (typeof parsed.value !== "object" || parsed.value === null || Array.isArray(parsed.value)) {
     return { jsonError: "Config must be a JSON object.", schemaErrors: [] };
   }
-  const schemaErrors = spec
-    ? validateConfig(parsed as Record<string, unknown>, spec.schema)
-    : [];
+  // Type-check only when the config is strict JSON. With unquoted value-position
+  // placeholders (lenient parse), the surrogate substitution would mis-type
+  // fields, so defer type validation to the cluster's placeholder-aware check.
+  const schemaErrors =
+    !parsed.lenient && spec
+      ? validateConfig(parsed.value as Record<string, unknown>, spec.schema)
+      : [];
   return { jsonError: null, schemaErrors };
 }
 
@@ -34,12 +53,24 @@ const inputClass =
   "w-full rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-bg)] px-3 py-1.5 text-sm text-[var(--swarm-ink)] placeholder:text-[var(--swarm-placeholder)] focus:border-[var(--swarm-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--swarm-primary)]/25";
 const fieldLabel = "mb-1 block text-sm font-medium text-[var(--swarm-ink)]";
 
-export function CreateTaskForm({ onClose }: CreateTaskFormProps) {
+export function CreateTaskForm({ onClose, task }: CreateTaskFormProps) {
   const queryClient = useQueryClient();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [taskType, setTaskType] = useState("");
-  const [configJson, setConfigJson] = useState("");
+  const editing = Boolean(task);
+  const [name, setName] = useState(task?.name ?? "");
+  const [description, setDescription] = useState(task?.description ?? "");
+  const [taskType, setTaskType] = useState(task?.taskType ?? "");
+  const [configJson, setConfigJson] = useState(task?.configJson ?? "");
+  const [strategy, setStrategy] = useState<DispatchStrategy>(
+    task?.defaultStrategy ?? "AnyOnlineNode",
+  );
+  const [targetTags, setTargetTags] = useState<Record<string, string>>(() => {
+    if (!task?.defaultTargetTagsJson) return {};
+    try {
+      return JSON.parse(task.defaultTargetTagsJson) ?? {};
+    } catch {
+      return {};
+    }
+  });
   const [touched, setTouched] = useState(false);
 
   const catalogQuery = useQuery({
@@ -49,24 +80,42 @@ export function CreateTaskForm({ onClose }: CreateTaskFormProps) {
   const specs = catalogQuery.data ? toSpecs(catalogQuery.data) : [];
   const spec = specs.find((s) => s.id === taskType);
 
-  // Default to the first advertised task type once the catalog loads.
+  // Default to the first advertised task type once the catalog loads (create only).
   useEffect(() => {
     if (!taskType && specs.length > 0) setTaskType(specs[0].id);
   }, [specs, taskType]);
 
-  const create = useMutation({
+  const defaultTargetTags = strategy === "TaggedNodes" ? targetTags : null;
+
+  const save = useMutation({
     mutationFn: () =>
-      apiClient.createTask({
-        name: name.trim(),
-        description: description.trim(),
-        taskType,
-        configJson,
-      }),
+      editing
+        ? apiClient.updateTask(task!.id, {
+            name: name.trim(),
+            description: description.trim(),
+            taskType,
+            configJson,
+            defaultStrategy: strategy,
+            defaultTargetTags,
+            expectedVersion: task!.version,
+          })
+        : apiClient.createTask({
+            name: name.trim(),
+            description: description.trim(),
+            taskType,
+            configJson,
+            defaultStrategy: strategy,
+            defaultTargetTags,
+          }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
+      if (editing) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.taskVersions(task!.id) });
+      }
       onClose();
     },
   });
+  const create = save; // keep existing references below working
 
   const { jsonError, schemaErrors } = checkConfig(configJson, spec);
   const nameError = name.trim() === "" ? "Name is required." : null;
@@ -142,6 +191,35 @@ export function CreateTaskForm({ onClose }: CreateTaskFormProps) {
             </p>
           )}
         </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor="task-strategy" className={fieldLabel}>
+            Default dispatch strategy
+          </label>
+          <select
+            id="task-strategy"
+            value={strategy}
+            onChange={(e) => setStrategy(e.target.value as DispatchStrategy)}
+            className={inputClass}
+          >
+            {STRATEGIES.map((s) => (
+              <option key={s} value={s}>
+                {STRATEGY_LABEL[s]}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-[var(--swarm-muted)]">
+            Used when dispatching this task unless overridden at dispatch or per pipeline step.
+          </p>
+        </div>
+        {strategy === "TaggedNodes" && (
+          <div>
+            <span className={fieldLabel}>Default target tags</span>
+            <TagMapEditor value={targetTags} onChange={setTargetTags} />
+          </div>
+        )}
       </div>
 
       <div>
@@ -220,7 +298,13 @@ export function CreateTaskForm({ onClose }: CreateTaskFormProps) {
           className="inline-flex items-center rounded-md bg-[var(--swarm-primary)] px-3 py-1.5 text-sm font-medium text-[var(--swarm-on-primary)] transition-colors hover:bg-[var(--swarm-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)] disabled:opacity-60"
           style={{ transitionDuration: "var(--swarm-duration)" }}
         >
-          {create.isPending ? "Creating…" : "Create task"}
+          {create.isPending
+            ? editing
+              ? "Saving…"
+              : "Creating…"
+            : editing
+              ? "Save changes"
+              : "Create task"}
         </button>
         <button
           type="button"

@@ -38,6 +38,14 @@ function App() {
           }
         />
         <Route
+          path="workflows/:id/edit"
+          element={
+            <Suspense fallback={<CanvasFallback />}>
+              <PipelineEditor />
+            </Suspense>
+          }
+        />
+        <Route
           path="workflows/:id"
           element={
             <Suspense fallback={<CanvasFallback />}>

@@ -10,11 +10,12 @@ import {
   type Edge,
 } from "@xyflow/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "../../../services/api";
 import { queryKeys } from "../../../services/queryKeys";
 import { uuid } from "../../../utils/id";
+import { pipelineToGraph } from "./pipelineToGraph";
 import {
   graphToSteps,
   validateGraph,
@@ -83,13 +84,35 @@ function newStep(position: { x: number; y: number }): StepFlowNode {
 function EditorInner() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { id: editId } = useParams();
+  const editing = Boolean(editId);
   const [nodes, setNodes, onNodesChange] = useNodesState<StepFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [cycleWarning, setCycleWarning] = useState(false);
+  const [expectedVersion, setExpectedVersion] = useState<number | undefined>(undefined);
   const addOffset = useRef(0);
+  const seededRef = useRef(false);
+
+  // Edit mode: load the existing pipeline and seed the canvas once.
+  const editQuery = useQuery({
+    queryKey: editId ? queryKeys.pipeline(editId) : ["pipeline", "none"],
+    queryFn: () => apiClient.getPipeline(editId!),
+    enabled: editing,
+  });
+
+  useEffect(() => {
+    if (!editing || seededRef.current || !editQuery.data) return;
+    const { nodes: n, edges: e } = pipelineToGraph(editQuery.data);
+    setNodes(n);
+    setEdges(e);
+    setName(editQuery.data.name);
+    setDescription(editQuery.data.description ?? "");
+    setExpectedVersion(editQuery.data.version);
+    seededRef.current = true;
+  }, [editing, editQuery.data, setNodes, setEdges]);
 
   const tasksQuery = useQuery({
     queryKey: queryKeys.tasks,
@@ -155,17 +178,30 @@ function EditorInner() {
   }, [nodes, edges, name]);
 
   const save = useMutation({
-    mutationFn: () =>
-      apiClient.createPipeline({
+    mutationFn: () => {
+      const body = {
         name: name.trim(),
         description: description.trim() || null,
         steps: graphToSteps(nodes, edges),
-      }),
-    onSuccess: () => {
+      };
+      return editing
+        ? apiClient.updatePipeline(editId!, { ...body, expectedVersion })
+        : apiClient.createPipeline(body);
+    },
+    onSuccess: (pipeline) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.pipelines });
-      navigate("/workflows");
+      if (editing) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.pipeline(editId!) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.pipelineVersions(editId!) });
+        navigate(`/workflows/${editId}`);
+      } else {
+        navigate(`/workflows/${pipeline.id}`);
+      }
     },
   });
+  const saveErrorConflict =
+    save.isError &&
+    (save.error as { response?: { status?: number } })?.response?.status === 409;
 
   return (
     <div className="flex h-full flex-col">
@@ -184,9 +220,14 @@ function EditorInner() {
           aria-label="Pipeline description"
           className="min-w-[12rem] flex-[2] rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-surface)] px-3 py-1.5 text-sm text-[var(--swarm-ink)] placeholder:text-[var(--swarm-placeholder)] focus:border-[var(--swarm-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--swarm-primary)]/25"
         />
+        {saveErrorConflict && (
+          <span className="text-xs text-[var(--swarm-danger)]" role="alert">
+            This pipeline changed since you opened it. Reload before saving.
+          </span>
+        )}
         <button
           type="button"
-          onClick={() => navigate("/workflows")}
+          onClick={() => navigate(editing ? `/workflows/${editId}` : "/workflows")}
           className="rounded-md px-3 py-1.5 text-sm font-medium text-[var(--swarm-muted)] transition-colors hover:bg-[var(--swarm-surface-raised)] hover:text-[var(--swarm-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)]"
           style={{ transitionDuration: "var(--swarm-duration)" }}
         >
@@ -200,7 +241,7 @@ function EditorInner() {
           className="rounded-md bg-[var(--swarm-primary)] px-3 py-1.5 text-sm font-medium text-[var(--swarm-on-primary)] transition-colors hover:bg-[var(--swarm-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)] disabled:opacity-60"
           style={{ transitionDuration: "var(--swarm-duration)" }}
         >
-          {save.isPending ? "Saving…" : "Save pipeline"}
+          {save.isPending ? "Saving…" : editing ? "Save changes" : "Save pipeline"}
         </button>
       </header>
 

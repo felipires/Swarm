@@ -8,6 +8,17 @@ public record CreateTaskRequest(
     DispatchStrategy DefaultStrategy = DispatchStrategy.SpecificNode,
     Dictionary<string, string>? DefaultTargetTags = null);
 
+/// <summary>Update a task definition (P1-10). Same shape as create plus an
+/// optional optimistic-concurrency guard.</summary>
+public record UpdateTaskRequest(
+    string Name,
+    string? Description,
+    string TaskType = "default@1",
+    string ConfigJson = "{}",
+    DispatchStrategy DefaultStrategy = DispatchStrategy.SpecificNode,
+    Dictionary<string, string>? DefaultTargetTags = null,
+    int? ExpectedVersion = null);
+
 /// <summary>
 /// Dispatch a task instance. All fields are optional — when omitted the
 /// TaskDefinition's <c>DefaultStrategy</c> and <c>DefaultTargetTags</c> apply.
@@ -29,6 +40,9 @@ public class TaskDefinitionResponse
     public string ConfigJson { get; init; } = "{}";
     public DispatchStrategy DefaultStrategy { get; init; }
     public string? DefaultTargetTagsJson { get; init; }
+    public int Version { get; init; }
+    public bool IsDeleted { get; init; }
+    public DateTime? DeletedAt { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
 }

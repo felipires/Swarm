@@ -78,6 +78,7 @@ var builder = Host.CreateDefaultBuilder(args)
         // TODO P4-3: trust model — Assembly.LoadFrom on an unsanitized path is unsafe
         // once Nodes run in shared environments. Revisit when the trust model lands.
         var pluginPath = configuration["Swarm:PluginsPath"];
+        Log.Information("PluginsPath: {pluginPath} - {Exists} - {pwd}", pluginPath, Directory.Exists(pluginPath), Directory.GetCurrentDirectory());
         if (!string.IsNullOrWhiteSpace(pluginPath) && Directory.Exists(pluginPath))
         {
             var bootstrap = Log.Logger;

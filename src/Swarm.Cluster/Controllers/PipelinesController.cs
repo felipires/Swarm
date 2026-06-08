@@ -10,18 +10,42 @@ namespace Swarm.Cluster.Controllers;
 public class PipelinesController : ControllerBase
 {
     private readonly PipelineService _service;
+    private readonly Swarm.Cluster.Services.EntityVersionService _versions;
     private readonly ILogger<PipelinesController> _logger;
 
-    public PipelinesController(PipelineService service, ILogger<PipelinesController> logger)
+    public PipelinesController(
+        PipelineService service,
+        Swarm.Cluster.Services.EntityVersionService versions,
+        ILogger<PipelinesController> logger)
     {
         _service = service;
+        _versions = versions;
         _logger = logger;
     }
 
+    private static List<PipelineService.StepDefinition> ToStepDefs(List<CreatePipelineStep> steps)
+        => steps.Select(s => new PipelineService.StepDefinition(
+            Name: s.Name,
+            TaskDefinitionId: s.TaskDefinitionId,
+            DependsOnByName: s.DependsOn ?? new List<string>(),
+            StrategyOverride: s.Strategy,
+            TargetNodeId: s.TargetNodeId,
+            TargetTags: s.TargetTags,
+            FailurePolicy: s.FailurePolicy,
+            Order: s.Order,
+            OutputMappings: s.OutputMappings,
+            RuntimeParamsJson: s.RuntimeParams is { ValueKind: System.Text.Json.JsonValueKind.Object }
+                ? s.RuntimeParams.Value.GetRawText()
+                : null)).ToList();
+
     [HttpGet]
-    public async Task<ActionResult<PagedResult<PipelineResponse>>> List([FromQuery] PageRequest page, CancellationToken cancellationToken)
+    public async Task<ActionResult<PagedResult<PipelineResponse>>> List(
+        [FromQuery] PageRequest page,
+        [FromQuery] bool includeDeleted,
+        CancellationToken cancellationToken)
     {
-        var (items, total) = await _service.ListAsync(page.Skip, page.NormalizedPageSize, cancellationToken);
+        var (items, total) = await _service.ListAsync(
+            page.Skip, page.NormalizedPageSize, includeDeleted, cancellationToken);
         var responses = items.Select(PipelineResponse.From).ToList();
         return Ok(new PagedResult<PipelineResponse>(responses, total, page.NormalizedPage, page.NormalizedPageSize));
     }
@@ -40,25 +64,75 @@ public class PipelinesController : ControllerBase
     {
         try
         {
-            var stepDefs = req.Steps.Select(s => new PipelineService.StepDefinition(
-                Name: s.Name,
-                TaskDefinitionId: s.TaskDefinitionId,
-                DependsOnByName: s.DependsOn ?? new List<string>(),
-                StrategyOverride: s.Strategy,
-                TargetNodeId: s.TargetNodeId,
-                TargetTags: s.TargetTags,
-                FailurePolicy: s.FailurePolicy,
-                Order: s.Order,
-                OutputMappings: s.OutputMappings,
-                RuntimeParamsJson: s.RuntimeParams is { ValueKind: System.Text.Json.JsonValueKind.Object }
-                    ? s.RuntimeParams.Value.GetRawText()
-                    : null)).ToList();
-            var pipeline = await _service.CreateAsync(req.Name, req.Description, stepDefs, cancellationToken);
+            var pipeline = await _service.CreateAsync(req.Name, req.Description, ToStepDefs(req.Steps), cancellationToken);
             return CreatedAtAction(nameof(Get), new { id = pipeline.Id }, PipelineResponse.From(pipeline));
         }
         catch (PipelineGraphException ex)
         {
             return BadRequest(new ApiError(ex.Code, ex.Message));
+        }
+    }
+
+    [HttpPut("{id}")]
+    public async Task<ActionResult<PipelineResponse>> Update(
+        Guid id, [FromBody] UpdatePipelineRequest req, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var pipeline = await _service.UpdateAsync(
+                id, req.Name, req.Description, ToStepDefs(req.Steps), req.ExpectedVersion, cancellationToken);
+            return Ok(PipelineResponse.From(pipeline));
+        }
+        catch (PipelineService.VersionConflictException ex)
+        {
+            return Conflict(new ApiError("VERSION_CONFLICT", ex.Message));
+        }
+        catch (PipelineGraphException ex)
+        {
+            return BadRequest(new ApiError(ex.Code, ex.Message));
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new ApiError("PIPELINE_NOT_FOUND", $"Pipeline {id} not found"));
+        }
+    }
+
+    // --- Version history (P1-10) ---
+
+    [HttpGet("{id}/versions")]
+    public async Task<ActionResult<List<EntityVersionResponse>>> ListVersions(Guid id, CancellationToken ct)
+    {
+        if (await _service.GetAsync(id, ct) is null)
+            return NotFound(new ApiError("PIPELINE_NOT_FOUND", $"Pipeline {id} not found"));
+        var rows = await _versions.ListAsync(VersionedEntityType.Pipeline, id, ct);
+        return Ok(rows.Select(EntityVersionResponse.Meta).ToList());
+    }
+
+    [HttpGet("{id}/versions/{version:int}")]
+    public async Task<ActionResult<EntityVersionResponse>> GetVersion(Guid id, int version, CancellationToken ct)
+    {
+        var row = await _versions.GetAsync(VersionedEntityType.Pipeline, id, version, ct);
+        if (row == null) return NotFound(new ApiError("VERSION_NOT_FOUND", $"Pipeline {id} has no version {version}"));
+        return Ok(EntityVersionResponse.Full(row));
+    }
+
+    [HttpPost("{id}/versions/{version:int}/restore")]
+    public async Task<ActionResult<PipelineResponse>> RestoreVersion(Guid id, int version, CancellationToken ct)
+    {
+        var row = await _versions.GetAsync(VersionedEntityType.Pipeline, id, version, ct);
+        if (row == null) return NotFound(new ApiError("VERSION_NOT_FOUND", $"Pipeline {id} has no version {version}"));
+
+        var snap = Swarm.Cluster.Services.EntityVersionService.Deserialize<PipelineService.PipelineSnapshot>(row.SnapshotJson);
+        try
+        {
+            var pipeline = await _service.UpdateAsync(
+                id, snap.Name, snap.Description, snap.Steps, expectedVersion: null, ct);
+            _logger.LogInformation("Restored pipeline {Id} version {From} as v{To}", id, version, pipeline.Version);
+            return Ok(PipelineResponse.From(pipeline));
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new ApiError("PIPELINE_NOT_FOUND", $"Pipeline {id} not found"));
         }
     }
 
@@ -68,6 +142,20 @@ public class PipelinesController : ControllerBase
         try
         {
             await _service.DeleteAsync(id, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new ApiError("PIPELINE_NOT_FOUND", $"Pipeline {id} not found"));
+        }
+    }
+
+    [HttpPost("{id}/undelete")]
+    public async Task<ActionResult> Undelete(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _service.UndeleteAsync(id, cancellationToken);
             return NoContent();
         }
         catch (InvalidOperationException)
@@ -124,6 +212,25 @@ public class PipelinesController : ControllerBase
     {
         var steps = await _service.GetRunStepsAsync(runId, cancellationToken);
         return Ok(steps.Select(PipelineStepInstanceResponse.From).ToList());
+    }
+
+    /// <summary>Resume a failed run, re-executing only the failed/skipped steps (P1-9 follow-up).</summary>
+    [HttpPost("runs/{runId}/retry-failed")]
+    public async Task<ActionResult<PipelineRunResponse>> RetryFailed(Guid runId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var run = await _service.RetryFailedAsync(runId, cancellationToken);
+            return Accepted(PipelineRunResponse.From(run));
+        }
+        catch (PipelineService.RunNotRetryableException ex)
+        {
+            return BadRequest(new ApiError("RUN_NOT_RETRYABLE", ex.Message));
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new ApiError("RUN_NOT_FOUND", $"PipelineRun {runId} not found"));
+        }
     }
 
     // --- P1-3 schedules under the pipeline they belong to ---
@@ -270,6 +377,14 @@ public record CreatePipelineRequest(
     string? Description,
     List<CreatePipelineStep> Steps);
 
+/// <summary>Replace a pipeline definition as a new version (P1-10). Same shape
+/// as create plus an optional optimistic-concurrency guard.</summary>
+public record UpdatePipelineRequest(
+    string Name,
+    string? Description,
+    List<CreatePipelineStep> Steps,
+    int? ExpectedVersion = null);
+
 public record CreatePipelineStep(
     string Name,
     Guid TaskDefinitionId,
@@ -292,6 +407,8 @@ public class PipelineResponse
     public string Name { get; init; } = null!;
     public string? Description { get; init; }
     public int Version { get; init; }
+    public bool IsDeleted { get; init; }
+    public DateTime? DeletedAt { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
     public List<PipelineStepResponse> Steps { get; init; } = new();
@@ -302,6 +419,8 @@ public class PipelineResponse
         Name = p.Name,
         Description = p.Description,
         Version = p.Version,
+        IsDeleted = p.IsDeleted,
+        DeletedAt = p.DeletedAt,
         CreatedAt = p.CreatedAt,
         UpdatedAt = p.UpdatedAt,
         Steps = p.Steps.OrderBy(s => s.Order).Select(PipelineStepResponse.From).ToList(),

@@ -51,5 +51,10 @@ public class TaskDefinition
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
+    /// <summary>Soft-delete flag (P1-10). Deleted tasks are hidden via a global
+    /// query filter but their rows, instances, and version history survive.</summary>
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+
     public ICollection<TaskInstance> Instances { get; set; } = new List<TaskInstance>();
 }

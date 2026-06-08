@@ -19,6 +19,7 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
     public DbSet<PipelineRun> PipelineRuns { get; set; } = null!;
     public DbSet<PipelineStepInstance> PipelineStepInstances { get; set; } = null!;
     public DbSet<Schedule> Schedules { get; set; } = null!;
+    public DbSet<EntityVersion> EntityVersions { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -60,6 +61,8 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.Property(e => e.ConfigJson).IsRequired().HasDefaultValue("{}");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()").IsRequired();
+            // P1-10: hide soft-deleted task definitions from every query.
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<TaskInstance>(entity =>
@@ -156,6 +159,8 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.Property(e => e.Version).HasDefaultValue(1).IsRequired();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()").IsRequired();
+            // P1-10: hide soft-deleted pipelines from every query.
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<PipelineStep>(entity =>
@@ -224,6 +229,18 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
                   .WithMany()
                   .HasForeignKey(e => e.PipelineId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EntityVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.EntityType).IsRequired();
+            entity.Property(e => e.SnapshotJson).IsRequired().HasColumnType("jsonb").HasDefaultValue("{}");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            // One row per (entity, version); list/lookup by entity.
+            entity.HasIndex(e => new { e.EntityType, e.EntityId, e.Version }).IsUnique();
+            entity.HasIndex(e => new { e.EntityType, e.EntityId });
         });
     }
 }

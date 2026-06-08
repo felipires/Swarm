@@ -158,6 +158,7 @@ public class SchedulerServiceTests
             services.AddScoped<TaskDispatchService>(sp =>
                 new TaskDispatchService(sp.GetRequiredService<ClusterDbContext>(), NullLogger<TaskDispatchService>.Instance));
             services.AddScoped<PipelineRunExecutor>();
+            services.AddScoped<EntityVersionService>();
             services.AddScoped<PipelineService>();
             services.AddScoped<ScheduleService>();
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -199,6 +200,7 @@ public class SchedulerServiceTests
                 new PipelineRunExecutor(Db,
                     new TaskDispatchService(Db, NullLogger<TaskDispatchService>.Instance),
                     NullLogger<PipelineRunExecutor>.Instance),
+                new EntityVersionService(Db),
                 NullLogger<PipelineService>.Instance);
             var pipeline = await pipelineSvc.CreateAsync("p", null,
                 new List<PipelineService.StepDefinition>

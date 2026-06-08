@@ -13,19 +13,35 @@ public class TasksController : ControllerBase
 {
     private readonly ClusterDbContext _db;
     private readonly TaskDispatchService _dispatch;
+    private readonly EntityVersionService _versions;
     private readonly ILogger<TasksController> _logger;
 
-    public TasksController(ClusterDbContext db, TaskDispatchService dispatch, ILogger<TasksController> logger)
+    public TasksController(
+        ClusterDbContext db,
+        TaskDispatchService dispatch,
+        EntityVersionService versions,
+        ILogger<TasksController> logger)
     {
         _db = db;
         _dispatch = dispatch;
+        _versions = versions;
         _logger = logger;
     }
 
+    /// <summary>The create-request-shaped snapshot persisted per task version.</summary>
+    private static CreateTaskRequest SnapshotOf(TaskDefinition t) => new(
+        t.Name, t.Description, t.TaskType, t.ConfigJson, t.DefaultStrategy,
+        string.IsNullOrEmpty(t.DefaultTargetTagsJson)
+            ? null
+            : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(t.DefaultTargetTagsJson));
+
     [HttpGet]
-    public async Task<ActionResult<PagedResult<TaskDefinitionResponse>>> GetAll([FromQuery] PageRequest page)
+    public async Task<ActionResult<PagedResult<TaskDefinitionResponse>>> GetAll(
+        [FromQuery] PageRequest page, [FromQuery] bool includeDeleted)
     {
-        var baseQuery = _db.TaskDefinitions.OrderByDescending(t => t.CreatedAt);
+        // includeDeleted bypasses the soft-delete filter so operators can see + restore.
+        var set = includeDeleted ? _db.TaskDefinitions.IgnoreQueryFilters() : _db.TaskDefinitions;
+        var baseQuery = set.OrderByDescending(t => t.CreatedAt);
         var total = await baseQuery.CountAsync();
         var items = await baseQuery
             .Skip(page.Skip)
@@ -39,7 +55,8 @@ public class TasksController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<TaskDefinitionResponse>> Get(Guid id)
     {
-        var t = await _db.TaskDefinitions.FindAsync(id);
+        // FirstOrDefault (not Find) so the soft-delete query filter applies.
+        var t = await _db.TaskDefinitions.FirstOrDefaultAsync(t => t.Id == id);
         if (t == null) return NotFound(new ApiError("TASK_NOT_FOUND", $"TaskDefinition {id} not found"));
         return Ok(ToResponse(t));
     }
@@ -58,16 +75,46 @@ public class TasksController : ControllerBase
             DefaultTargetTagsJson = req.DefaultTargetTags is { Count: > 0 }
                 ? System.Text.Json.JsonSerializer.Serialize(req.DefaultTargetTags)
                 : null,
+            Version = 1,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         _db.TaskDefinitions.Add(task);
+        _versions.Record(VersionedEntityType.Task, task.Id, task.Version, SnapshotOf(task));
         await _db.SaveChangesAsync();
 
-        _logger.LogInformation("Created task definition {Id} '{Name}'", task.Id, task.Name);
+        _logger.LogInformation("Created task definition {Id} '{Name}' v{Version}", task.Id, task.Name, task.Version);
 
         return CreatedAtAction(nameof(Get), new { id = task.Id }, ToResponse(task));
+    }
+
+    [HttpPut("{id}")]
+    public async Task<ActionResult<TaskDefinitionResponse>> Update(Guid id, [FromBody] UpdateTaskRequest req)
+    {
+        var task = await _db.TaskDefinitions.FirstOrDefaultAsync(t => t.Id == id);
+        if (task == null) return NotFound(new ApiError("TASK_NOT_FOUND", $"TaskDefinition {id} not found"));
+
+        if (req.ExpectedVersion is { } expected && expected != task.Version)
+            return Conflict(new ApiError("VERSION_CONFLICT",
+                $"Task is at version {task.Version}, not {expected}; reload before editing"));
+
+        task.Name = req.Name;
+        task.Description = req.Description;
+        task.TaskType = req.TaskType;
+        task.ConfigJson = req.ConfigJson;
+        task.DefaultStrategy = req.DefaultStrategy;
+        task.DefaultTargetTagsJson = req.DefaultTargetTags is { Count: > 0 }
+            ? System.Text.Json.JsonSerializer.Serialize(req.DefaultTargetTags)
+            : null;
+        task.Version += 1;
+        task.UpdatedAt = DateTime.UtcNow;
+
+        _versions.Record(VersionedEntityType.Task, task.Id, task.Version, SnapshotOf(task));
+        await _db.SaveChangesAsync();
+
+        _logger.LogInformation("Updated task definition {Id} → v{Version}", task.Id, task.Version);
+        return Ok(ToResponse(task));
     }
 
     private static TaskDefinitionResponse ToResponse(TaskDefinition t) => new()
@@ -79,6 +126,9 @@ public class TasksController : ControllerBase
         ConfigJson = t.ConfigJson,
         DefaultStrategy = t.DefaultStrategy,
         DefaultTargetTagsJson = t.DefaultTargetTagsJson,
+        Version = t.Version,
+        IsDeleted = t.IsDeleted,
+        DeletedAt = t.DeletedAt,
         CreatedAt = t.CreatedAt,
         UpdatedAt = t.UpdatedAt
     };
@@ -86,12 +136,74 @@ public class TasksController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<ActionResult> Delete(Guid id)
     {
-        var task = await _db.TaskDefinitions.FindAsync(id);
+        var task = await _db.TaskDefinitions.FirstOrDefaultAsync(t => t.Id == id);
         if (task == null) return NotFound(new ApiError("TASK_NOT_FOUND", $"TaskDefinition {id} not found"));
 
-        _db.TaskDefinitions.Remove(task);
+        // Soft delete (P1-10): hidden by the global query filter; instances + history survive.
+        task.IsDeleted = true;
+        task.DeletedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    [HttpPost("{id}/undelete")]
+    public async Task<ActionResult> Undelete(Guid id)
+    {
+        var task = await _db.TaskDefinitions.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == id);
+        if (task == null) return NotFound(new ApiError("TASK_NOT_FOUND", $"TaskDefinition {id} not found"));
+
+        task.IsDeleted = false;
+        task.DeletedAt = null;
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    // --- Version history (P1-10) ---
+
+    [HttpGet("{id}/versions")]
+    public async Task<ActionResult<List<EntityVersionResponse>>> ListVersions(Guid id, CancellationToken ct)
+    {
+        if (!await _db.TaskDefinitions.AnyAsync(t => t.Id == id, ct))
+            return NotFound(new ApiError("TASK_NOT_FOUND", $"TaskDefinition {id} not found"));
+        var rows = await _versions.ListAsync(VersionedEntityType.Task, id, ct);
+        return Ok(rows.Select(EntityVersionResponse.Meta).ToList());
+    }
+
+    [HttpGet("{id}/versions/{version:int}")]
+    public async Task<ActionResult<EntityVersionResponse>> GetVersion(Guid id, int version, CancellationToken ct)
+    {
+        var row = await _versions.GetAsync(VersionedEntityType.Task, id, version, ct);
+        if (row == null) return NotFound(new ApiError("VERSION_NOT_FOUND", $"Task {id} has no version {version}"));
+        return Ok(EntityVersionResponse.Full(row));
+    }
+
+    [HttpPost("{id}/versions/{version:int}/restore")]
+    public async Task<ActionResult<TaskDefinitionResponse>> RestoreVersion(Guid id, int version, CancellationToken ct)
+    {
+        var task = await _db.TaskDefinitions.FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (task == null) return NotFound(new ApiError("TASK_NOT_FOUND", $"TaskDefinition {id} not found"));
+
+        var row = await _versions.GetAsync(VersionedEntityType.Task, id, version, ct);
+        if (row == null) return NotFound(new ApiError("VERSION_NOT_FOUND", $"Task {id} has no version {version}"));
+
+        var snap = EntityVersionService.Deserialize<CreateTaskRequest>(row.SnapshotJson);
+        task.Name = snap.Name;
+        task.Description = snap.Description;
+        task.TaskType = snap.TaskType;
+        task.ConfigJson = snap.ConfigJson;
+        task.DefaultStrategy = snap.DefaultStrategy;
+        task.DefaultTargetTagsJson = snap.DefaultTargetTags is { Count: > 0 }
+            ? System.Text.Json.JsonSerializer.Serialize(snap.DefaultTargetTags)
+            : null;
+        task.Version += 1;
+        task.UpdatedAt = DateTime.UtcNow;
+
+        _versions.Record(VersionedEntityType.Task, task.Id, task.Version, SnapshotOf(task));
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Restored task {Id} version {From} as v{To}", task.Id, version, task.Version);
+        return Ok(ToResponse(task));
     }
 
     /// <summary>

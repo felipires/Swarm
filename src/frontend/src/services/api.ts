@@ -6,6 +6,8 @@ import type {
   CreateScheduleRequest,
   CursorPage,
   DispatchRequest,
+  DispatchStrategy,
+  EntityVersionEntry,
   Node,
   NodeMetrics,
   Pipeline,
@@ -96,8 +98,10 @@ class ApiClient {
   }
 
   // Tasks
-  async getTasks(): Promise<TaskDefinition[]> {
-    const response = await this.client.get("/tasks");
+  async getTasks(includeDeleted = false): Promise<TaskDefinition[]> {
+    const response = await this.client.get("/tasks", {
+      params: includeDeleted ? { includeDeleted: true } : {},
+    });
     return response.data.items;
   }
 
@@ -111,9 +115,46 @@ class ApiClient {
     description: string;
     taskType: string;
     configJson: string;
+    defaultStrategy?: DispatchStrategy;
+    defaultTargetTags?: Record<string, string> | null;
   }): Promise<TaskDefinition> {
     const response = await this.client.post("/tasks", req);
     return response.data;
+  }
+
+  async updateTask(
+    id: string,
+    req: {
+      name: string;
+      description: string;
+      taskType: string;
+      configJson: string;
+      defaultStrategy?: DispatchStrategy;
+      defaultTargetTags?: Record<string, string> | null;
+      expectedVersion?: number;
+    },
+  ): Promise<TaskDefinition> {
+    const response = await this.client.put(`/tasks/${id}`, req);
+    return response.data;
+  }
+
+  async getTaskVersions(id: string): Promise<EntityVersionEntry[]> {
+    const response = await this.client.get(`/tasks/${id}/versions`);
+    return response.data;
+  }
+
+  async getTaskVersion(id: string, version: number): Promise<EntityVersionEntry> {
+    const response = await this.client.get(`/tasks/${id}/versions/${version}`);
+    return response.data;
+  }
+
+  async restoreTaskVersion(id: string, version: number): Promise<TaskDefinition> {
+    const response = await this.client.post(`/tasks/${id}/versions/${version}/restore`);
+    return response.data;
+  }
+
+  async undeleteTask(id: string): Promise<void> {
+    await this.client.post(`/tasks/${id}/undelete`);
   }
 
   async deleteTask(id: string): Promise<void> {
@@ -149,8 +190,10 @@ class ApiClient {
   }
 
   // Pipelines
-  async getPipelines(): Promise<Pipeline[]> {
-    const response = await this.client.get("/pipelines");
+  async getPipelines(includeDeleted = false): Promise<Pipeline[]> {
+    const response = await this.client.get("/pipelines", {
+      params: includeDeleted ? { includeDeleted: true } : {},
+    });
     return response.data.items;
   }
 
@@ -164,8 +207,40 @@ class ApiClient {
     return response.data;
   }
 
+  async updatePipeline(
+    id: string,
+    req: CreatePipelineRequest & { expectedVersion?: number },
+  ): Promise<Pipeline> {
+    const response = await this.client.put(`/pipelines/${id}`, req);
+    return response.data;
+  }
+
+  async getPipelineVersions(id: string): Promise<EntityVersionEntry[]> {
+    const response = await this.client.get(`/pipelines/${id}/versions`);
+    return response.data;
+  }
+
+  async getPipelineVersion(id: string, version: number): Promise<EntityVersionEntry> {
+    const response = await this.client.get(`/pipelines/${id}/versions/${version}`);
+    return response.data;
+  }
+
+  async restorePipelineVersion(id: string, version: number): Promise<Pipeline> {
+    const response = await this.client.post(`/pipelines/${id}/versions/${version}/restore`);
+    return response.data;
+  }
+
   async deletePipeline(id: string): Promise<void> {
     await this.client.delete(`/pipelines/${id}`);
+  }
+
+  async undeletePipeline(id: string): Promise<void> {
+    await this.client.post(`/pipelines/${id}/undelete`);
+  }
+
+  async retryFailedRun(runId: string): Promise<PipelineRun> {
+    const response = await this.client.post(`/pipelines/runs/${runId}/retry-failed`);
+    return response.data;
   }
 
   async getPipelineRuns(

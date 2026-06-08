@@ -32,7 +32,7 @@ function LogRow({ entry, top }: { entry: LogEntry; top: number }) {
   return (
     <div
       className="absolute left-0 right-0 flex items-center gap-3 px-3 font-mono text-xs"
-      style={{ top, height: ROW_HEIGHT, lineHeight: `${ROW_HEIGHT}px` }}
+      style={{ top, minHeight: ROW_HEIGHT, lineHeight: `${ROW_HEIGHT}px` }}
     >
       <span className="shrink-0 tabular-nums text-[var(--swarm-muted)]">
         {logTime(entry.timestamp)}
@@ -95,7 +95,10 @@ export function LogStreamPanel({
   const total = visible.length;
   const totalHeight = total * ROW_HEIGHT;
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-  const end = Math.min(total, Math.ceil((scrollTop + viewportH) / ROW_HEIGHT) + OVERSCAN);
+  const end = Math.min(
+    total,
+    Math.ceil((scrollTop + viewportH) / ROW_HEIGHT) + OVERSCAN,
+  );
   const slice = visible.slice(start, end);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -103,7 +106,8 @@ export function LogStreamPanel({
     setScrollTop(el.scrollTop);
     // If the user scrolls away from the bottom, disengage auto-scroll;
     // re-engage when they return to within a row of the bottom.
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < ROW_HEIGHT;
+    const atBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < ROW_HEIGHT;
     if (atBottom !== autoScroll) onAutoScrollChange(atBottom);
   };
 

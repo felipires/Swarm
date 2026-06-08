@@ -46,10 +46,11 @@ export const TasksPage = () => {
   const now = useTicker(5_000);
   const [filter, setFilter] = useState("");
   const [creating, setCreating] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const query = useQuery({
-    queryKey: queryKeys.tasks,
-    queryFn: () => apiClient.getTasks(),
+    queryKey: [...queryKeys.tasks, { includeDeleted: showDeleted }],
+    queryFn: () => apiClient.getTasks(showDeleted),
     refetchInterval: 30_000,
   });
 
@@ -104,6 +105,15 @@ export const TasksPage = () => {
               />
             </div>
           )}
+          <label className="flex shrink-0 items-center gap-1.5 text-sm text-[var(--swarm-muted)]">
+            <input
+              type="checkbox"
+              checked={showDeleted}
+              onChange={(e) => setShowDeleted(e.target.checked)}
+              className="h-4 w-4 accent-[var(--swarm-primary)]"
+            />
+            Show deleted
+          </label>
           <button
             type="button"
             onClick={() => setCreating((c) => !c)}

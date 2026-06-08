@@ -8,29 +8,51 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { IconChevron } from "../../../components/shell/icons";
 import { StatusPill } from "../../../components/ui/StatusPill";
+import { VersionBadge } from "../../../components/ui/VersionBadge";
+import { VersionHistory } from "../../../components/ui/VersionHistory";
 import { useTicker } from "../../../hooks/useTicker";
 import { apiClient } from "../../../services/api";
 import { queryKeys } from "../../../services/queryKeys";
 import type { PipelineRun, PipelineStepInstance } from "../../../store/store";
 import { absoluteTime, duration, relativeTime } from "../../../utils/time";
+import { FAILURE_LABEL, STRATEGY_LABEL } from "../pipelineGraph";
 import { isRunning, RUN_TONE } from "../runStatus";
 import { ScheduleChip } from "../ScheduleChip";
+import { parseParamsWithPlaceholders } from "../../../utils/placeholderJson";
 import { PipelineCanvas } from "./PipelineCanvas";
 import { StepDetail } from "./StepDetail";
 
-function parseParams(
-  raw: string,
-): { ok: true; value?: Record<string, unknown> } | { ok: false } {
-  if (raw.trim() === "") return { ok: true, value: undefined };
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-      return { ok: false };
-    return { ok: true, value: parsed };
-  } catch {
-    return { ok: false };
-  }
+/** Renders a pipeline version snapshot (draft shape) as a compact step list. */
+function PipelineSnapshotView({ snapshot }: { snapshot: unknown }) {
+  const s = snapshot as {
+    steps?: Array<{
+      name: string;
+      dependsOn?: string[];
+      strategy?: keyof typeof STRATEGY_LABEL | null;
+      failurePolicy?: keyof typeof FAILURE_LABEL;
+    }>;
+  };
+  const steps = s.steps ?? [];
+  if (steps.length === 0) return <p className="text-xs text-[var(--swarm-muted)]">No steps.</p>;
+  return (
+    <ul className="space-y-1.5">
+      {steps.map((st) => (
+        <li key={st.name} className="text-xs">
+          <span className="font-medium text-[var(--swarm-ink)]">{st.name}</span>
+          {st.dependsOn && st.dependsOn.length > 0 && (
+            <span className="text-[var(--swarm-muted)]"> ← {st.dependsOn.join(", ")}</span>
+          )}
+          <span className="block text-[var(--swarm-muted)]">
+            {st.strategy ? STRATEGY_LABEL[st.strategy] : "inherited"} ·{" "}
+            {st.failurePolicy ? FAILURE_LABEL[st.failurePolicy] : "fail"}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
 }
+
+const parseParams = parseParamsWithPlaceholders;
 
 export function PipelineView() {
   const { id = "" } = useParams();
@@ -39,6 +61,7 @@ export function PipelineView() {
   const now = useTicker(5_000);
 
   const [drawerOpen, setDrawerOpen] = useState(true);
+  const [drawerTab, setDrawerTab] = useState<"runs" | "versions">("runs");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [runOpen, setRunOpen] = useState(false);
@@ -101,6 +124,15 @@ export function PipelineView() {
   });
   const paramsValid = parseParams(paramsRaw).ok;
 
+  const selectedRun = runs.find((r) => r.id === selectedRunId) ?? null;
+  const retry = useMutation({
+    mutationFn: (runId: string) => apiClient.retryFailedRun(runId),
+    onSuccess: (created) => {
+      setSelectedRunId(created.id);
+      queryClient.invalidateQueries({ queryKey: queryKeys.pipelineRuns(id) });
+    },
+  });
+
   const selectedStep =
     pipeline?.steps.find((s) => s.id === selectedStepId) ?? null;
   const taskNameFor = (taskId: string) =>
@@ -125,6 +157,7 @@ export function PipelineView() {
             <h1 className="truncate text-base font-semibold text-[var(--swarm-ink)]">
               {pipeline?.name ?? "Pipeline"}
             </h1>
+            {pipeline?.version != null && <VersionBadge version={pipeline.version} />}
             {pipeline && <ScheduleChip pipelineId={pipeline.id} />}
           </div>
           {pipeline?.description && (
@@ -134,6 +167,15 @@ export function PipelineView() {
           )}
         </div>
 
+        <button
+          type="button"
+          onClick={() => navigate(`/workflows/${id}/edit`)}
+          disabled={!pipeline}
+          className="rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-surface)] px-3 py-1.5 text-sm font-medium text-[var(--swarm-ink)] transition-colors hover:bg-[var(--swarm-surface-raised)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)] disabled:opacity-60"
+          style={{ transitionDuration: "var(--swarm-duration)" }}
+        >
+          Edit
+        </button>
         <button
           type="button"
           onClick={() => setRunOpen((o) => !o)}
@@ -237,23 +279,66 @@ export function PipelineView() {
         {drawerOpen && pipeline && (
           <aside
             className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-[var(--swarm-border)] bg-[var(--swarm-surface)]"
-            aria-label="Run history"
+            aria-label="Run history and versions"
           >
-            <div className="flex items-center justify-between border-b border-[var(--swarm-border)] px-4 py-2.5">
-              <span className="text-xs font-medium uppercase tracking-wide text-[var(--swarm-muted)]">
-                Runs
-              </span>
-              {selectedRunId && (
+            <div className="flex items-center gap-1 border-b border-[var(--swarm-border)] px-2 py-1.5">
+              {(["runs", "versions"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setDrawerTab(tab)}
+                  aria-pressed={drawerTab === tab}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--swarm-focus)] ${
+                    drawerTab === tab
+                      ? "bg-[var(--swarm-primary-subtle)] text-[var(--swarm-ink)]"
+                      : "text-[var(--swarm-muted)] hover:text-[var(--swarm-ink)]"
+                  }`}
+                  style={{ transitionDuration: "var(--swarm-duration)" }}
+                >
+                  {tab}
+                </button>
+              ))}
+              {drawerTab === "runs" && selectedRunId && (
                 <button
                   type="button"
                   onClick={() => setSelectedRunId(null)}
-                  className="text-xs font-medium text-[var(--swarm-primary)] hover:underline"
+                  className="ml-auto text-xs font-medium text-[var(--swarm-primary)] hover:underline"
                 >
                   Clear
                 </button>
               )}
             </div>
+
+            {drawerTab === "versions" ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                <VersionHistory
+                  kind="pipeline"
+                  entityId={pipeline.id}
+                  currentVersion={pipeline.version}
+                  versionsKey={queryKeys.pipelineVersions(pipeline.id)}
+                  onRestored={() => queryClient.invalidateQueries({ queryKey: queryKeys.pipeline(id) })}
+                  renderSnapshot={(snap) => <PipelineSnapshotView snapshot={snap} />}
+                  now={now}
+                />
+              </div>
+            ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              {selectedRun?.status === "Failed" && (
+                <button
+                  type="button"
+                  onClick={() => retry.mutate(selectedRun.id)}
+                  disabled={retry.isPending}
+                  className="mb-2 w-full rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-surface)] px-2 py-1.5 text-xs font-medium text-[var(--swarm-ink)] transition-colors hover:bg-[var(--swarm-surface-raised)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)] disabled:opacity-60"
+                  style={{ transitionDuration: "var(--swarm-duration)" }}
+                >
+                  {retry.isPending ? "Retrying…" : "Retry failed steps"}
+                </button>
+              )}
+              {retry.isError && (
+                <p role="alert" className="mb-2 text-xs text-[var(--swarm-danger)]">
+                  Could not retry this run.
+                </p>
+              )}
               {runsQuery.isLoading ? (
                 <div className="space-y-1.5 p-2">
                   {Array.from({ length: 4 }).map((_, i) => (
@@ -336,6 +421,7 @@ export function PipelineView() {
                 </button>
               )}
             </div>
+            )}
           </aside>
         )}
       </div>

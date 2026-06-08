@@ -1,4 +1,5 @@
 import type { CapabilityCatalogEntry, JsonSchema } from "../../store/store";
+export { parseConfigWithPlaceholders } from "../../utils/placeholderJson";
 
 /** Parsed, validated view of a capability entry the task form can author against. */
 export interface TaskTypeSpec {
@@ -25,6 +26,7 @@ const PLACEHOLDER_RE = /\{[a-z]+:[^}]+\}/;
 function isPlaceholder(v: unknown): boolean {
   return typeof v === "string" && PLACEHOLDER_RE.test(v);
 }
+
 
 function jsonType(v: unknown): string {
   if (v === null) return "null";
