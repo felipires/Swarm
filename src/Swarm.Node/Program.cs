@@ -16,10 +16,11 @@ var configuration = new ConfigurationBuilder()
     .AddEnvironmentVariables()
     .Build();
 
-Log.Logger = SerilogConfiguration.Configure(configuration).CreateBootstrapLogger();
+var dynamicRabbitSink = new DynamicRabbitMqSink();
 
-// Replace bootstrap logger with full logger including RabbitMQ sink
-SerilogConfiguration.AddRabbitMQSink(configuration);
+Log.Logger = SerilogConfiguration.Configure(configuration)
+    .WriteTo.Sink(dynamicRabbitSink)
+    .CreateBootstrapLogger();
 
 var builder = Host.CreateDefaultBuilder(args)
     .ConfigureServices(services =>
@@ -28,6 +29,7 @@ var builder = Host.CreateDefaultBuilder(args)
         services.Configure<DataConfiguration>(configuration.GetSection("Database"));
 
         // Replace default logging with Serilog
+        services.AddSingleton(dynamicRabbitSink);
         services.AddSerilog(Log.Logger);
 
         // Configure gRPC channel

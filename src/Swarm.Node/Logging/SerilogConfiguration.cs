@@ -1,5 +1,8 @@
-using Serilog;
+using System.Collections.Concurrent;
 using Serilog.Sinks.RabbitMQ;
+using Serilog.Events;
+using Serilog;
+using Serilog.Core;
 
 namespace Swarm.Node.Logging;
 
@@ -12,33 +15,74 @@ public static class SerilogConfiguration
             .Enrich.FromLogContext()
             .Enrich.WithMachineName()
             .Enrich.WithThreadId()
-            .Enrich.With<SecretRedactionEnricher>() // P4-2a — scrub :secret values
+            .Enrich.With<SecretRedactionEnricher>()
             .Enrich.WithProperty("Application", "Swarm.Node");
     }
+}
 
-    public static void AddRabbitMQSink(IConfiguration configuration)
+public class DynamicRabbitMqSink : ILogEventSink
+{
+    private readonly object _lock = new();
+    private Logger? _rabbitLogger;
+    private bool _configured;
+    private readonly ConcurrentQueue<LogEvent> _buffer = new();
+
+    public void Configure(IConfiguration configuration)
     {
-        var rabbitMqConfig = configuration.GetSection("RabbitMQ");
-        var nodeId = configuration["NodeId"] ?? "unknown";
+        lock (_lock)
+        {
+            if (_configured)
+                return;
 
-        var hostname = rabbitMqConfig["Hostname"] ?? "localhost";
-        var port = ushort.Parse(rabbitMqConfig["Port"] ?? "5672");
-        var username = rabbitMqConfig["Username"] ?? "guest";
-        var password = rabbitMqConfig["Password"] ?? "guest";
+            var rabbitMqConfig = configuration.GetSection("RabbitMQ");
+            var nodeId = configuration["NodeId"] ?? "unknown";
 
-        Log.Logger = Configure(configuration)
-            .Enrich.WithProperty("NodeId", nodeId)
-            .WriteTo.RabbitMQ((clientCfg, sinkCfg) =>
-            {
-                // Configure connection details
-                clientCfg.Username = username;
-                clientCfg.Password = password;
-                clientCfg.Hostnames = [hostname];
-                clientCfg.Port = port;
-                clientCfg.Exchange = "";
-                clientCfg.RoutingKey = "logs";
-                clientCfg.DeliveryMode = RabbitMQDeliveryMode.Durable;
-            })
-            .CreateLogger();
+            var hostname = rabbitMqConfig["Hostname"] ?? "localhost";
+            var port = ushort.Parse(rabbitMqConfig["Port"] ?? "5672");
+            var username = rabbitMqConfig["Username"] ?? "guest";
+            var password = rabbitMqConfig["Password"] ?? "guest";
+
+            _rabbitLogger = new LoggerConfiguration()
+                .Enrich.WithProperty("NodeId", nodeId)
+                .WriteTo.RabbitMQ((clientCfg, sinkCfg) =>
+                {
+                    clientCfg.Username = username;
+                    clientCfg.Password = password;
+                    clientCfg.Hostnames = [hostname];
+                    clientCfg.Port = port;
+                    clientCfg.Exchange = "";
+                    clientCfg.RoutingKey = "logs";
+                    clientCfg.DeliveryMode = RabbitMQDeliveryMode.Durable;
+                })
+                .CreateLogger();
+
+            _configured = true;
+
+            FlushBuffer();
+        }
+    }
+
+    public void Emit(LogEvent logEvent)
+    {
+        if (_rabbitLogger is not null)
+            _rabbitLogger.Write(logEvent);
+        else
+            _buffer.Enqueue(logEvent);
+    }
+
+    private void FlushBuffer()
+    {
+        if (_rabbitLogger is null)
+            return;
+
+        while (_buffer.TryDequeue(out var evt))
+        {
+            _rabbitLogger.Write(evt);
+        }
+    }
+
+    public void Dispose()
+    {
+        _rabbitLogger?.Dispose();
     }
 }

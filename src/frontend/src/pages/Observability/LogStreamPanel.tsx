@@ -111,17 +111,11 @@ export function LogStreamPanel({
     if (atBottom !== autoScroll) onAutoScrollChange(atBottom);
   };
 
-  if (total === 0) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-[var(--swarm-muted)]">
-        {entries.length === 0
-          ? "Waiting for log events…"
-          : "No entries match the current filter."}
-      </div>
-    );
-  }
-
   return (
+    // The scroll container is always mounted (even when empty) so the
+    // ResizeObserver attaches on first mount and `viewportH` is measured.
+    // Otherwise the virtualization window collapses to the overscan and only a
+    // handful of rows render.
     <div
       ref={scrollRef}
       onScroll={handleScroll}
@@ -130,11 +124,19 @@ export function LogStreamPanel({
       aria-label="Log stream"
       tabIndex={0}
     >
-      <div style={{ height: totalHeight, position: "relative" }}>
-        {slice.map((entry, i) => (
-          <LogRow key={entry.id} entry={entry} top={(start + i) * ROW_HEIGHT} />
-        ))}
-      </div>
+      {total === 0 ? (
+        <div className="flex h-full items-center justify-center text-sm text-[var(--swarm-muted)]">
+          {entries.length === 0
+            ? "Waiting for log events…"
+            : "No entries match the current filter."}
+        </div>
+      ) : (
+        <div style={{ height: totalHeight, position: "relative" }}>
+          {slice.map((entry, i) => (
+            <LogRow key={entry.id} entry={entry} top={(start + i) * ROW_HEIGHT} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

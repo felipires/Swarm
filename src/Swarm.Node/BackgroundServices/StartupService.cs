@@ -11,7 +11,8 @@ public class StartupService(
     AppDbConnection dbConnection,
     IConfiguration configuration,
     ILogger<StartupService> logger,
-    IHostApplicationLifetime appLifetime
+    IHostApplicationLifetime appLifetime,
+    DynamicRabbitMqSink dynamicRabbitMqSink
     ) : IHostedService
 {
     private readonly BackgroundMaestro _gate = gate;
@@ -20,6 +21,7 @@ public class StartupService(
     private readonly IConfiguration _configuration = configuration;
     private readonly IHostApplicationLifetime _appLifetime = appLifetime;
     private readonly RegistrationService _registrationService = registrationService;
+    private readonly DynamicRabbitMqSink _dynamicRabbitMqSink = dynamicRabbitMqSink;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -62,7 +64,7 @@ public class StartupService(
             }
 
             _logger.LogInformation("Node registered successfully. Configuring RabbitMQ logging sink.");
-            SerilogConfiguration.AddRabbitMQSink(_configuration);
+            _dynamicRabbitMqSink.Configure(configuration);
             _logger.LogInformation("RabbitMQ logging sink configured and active");
 
             _logger.LogDebug("Node initialization completed successfully");

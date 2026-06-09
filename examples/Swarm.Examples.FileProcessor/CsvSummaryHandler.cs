@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Swarm.Sdk.Abstractions;
 using Microsoft.Extensions.Logging;
 
