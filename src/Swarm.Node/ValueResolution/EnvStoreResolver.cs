@@ -4,29 +4,30 @@ using Swarm.Sdk.ValueResolution;
 namespace Swarm.Node.ValueResolution;
 
 /// <summary>
-/// Resolves <c>env:KEY</c> placeholders from the Node's task-env store
-/// (roadmap P1-5a). Tier order (first hit wins):
+/// Resolves <c>env:KEY</c> placeholders from the Node's task-env stores.
+/// Tier order (first hit wins):
 ///   1. Process env vars prefixed with <c>SWARM_TASKENV_</c>
-///   2. Local encrypted SQLite store (<see cref="EnvSecretsStore"/>)
+///   2. Local encrypted SQLite store (<see cref="EnvSecretsStore"/>) — Tier 2
+///   3. Cluster-pushed plaintext SQLite store (<see cref="PlaintextConfigStore"/>) — Tier 3
 ///
-/// Tier 3 (Cluster-pushed plaintext config) is a follow-up: the operational
-/// path for non-secret task config that the Cluster can see in clear.
-/// Values resolved from Tier 2 are flagged <c>IsSecret = true</c> so the
-/// redaction enricher (P4-2a) scrubs them from logs even without an explicit
-/// <c>:secret</c> modifier on the placeholder.
+/// Values from Tier 2 are flagged <c>IsSecret = true</c> so the redaction
+/// enricher (P4-2a) scrubs them from logs even without an explicit <c>:secret</c>
+/// modifier on the placeholder. Tier 3 values are non-secret (IsSecret = false).
 /// </summary>
 public class EnvStoreResolver : IValueResolver
 {
     public const string EnvVarPrefix = "SWARM_TASKENV_";
 
-    private readonly EnvSecretsStore? _store;
+    private readonly EnvSecretsStore? _secrets;
+    private readonly PlaintextConfigStore? _config;
 
     /// <summary>Parameterless ctor for tests that only need Tier 1.</summary>
-    public EnvStoreResolver() : this(null) { }
+    public EnvStoreResolver() : this(null, null) { }
 
-    public EnvStoreResolver(EnvSecretsStore? store)
+    public EnvStoreResolver(EnvSecretsStore? secrets, PlaintextConfigStore? config = null)
     {
-        _store = store;
+        _secrets = secrets;
+        _config = config;
     }
 
     public string Source => "env";
@@ -39,11 +40,19 @@ public class EnvStoreResolver : IValueResolver
             return new ResolvedValue(value, IsSecret: false);
 
         // Tier 2: encrypted SQLite store.
-        if (_store is not null)
+        if (_secrets is not null)
         {
-            var encrypted = await _store.GetAsync(key, cancellationToken);
+            var encrypted = await _secrets.GetAsync(key, cancellationToken);
             if (encrypted is not null)
                 return new ResolvedValue(encrypted, IsSecret: true);
+        }
+
+        // Tier 3: plaintext config pushed by Cluster.
+        if (_config is not null)
+        {
+            var plain = await _config.GetAsync(key, cancellationToken);
+            if (plain is not null)
+                return new ResolvedValue(plain, IsSecret: false);
         }
 
         return null;

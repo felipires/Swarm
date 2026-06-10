@@ -109,6 +109,7 @@ public class NodeCapabilityRegistrationTests
             })
             .Build();
         return new NodeService(db, NullLogger<NodeService>.Instance, config,
-            new Swarm.Cluster.Services.Tags.InMemoryTagMatcher(db));
+            new Swarm.Cluster.Services.Tags.InMemoryTagMatcher(db),
+            new ClusterEnvCrypto(config, NullLogger<ClusterEnvCrypto>.Instance));
     }
 }

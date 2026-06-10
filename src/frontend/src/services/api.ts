@@ -83,9 +83,9 @@ class ApiClient {
     return response.data;
   }
 
-  /** Queue an env secret for delivery to the node on its next heartbeat. */
-  async setNodeEnv(id: string, key: string, value: string): Promise<void> {
-    await this.client.post(`/nodes/${id}/env`, { key, value });
+  /** Queue an env value for delivery to the node on its next heartbeat. */
+  async setNodeEnv(id: string, key: string, value: string, isSecret = true): Promise<void> {
+    await this.client.post(`/nodes/${id}/env`, { key, value, isSecret });
   }
 
   /** Queue an env-key deletion for the node. */

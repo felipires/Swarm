@@ -118,6 +118,8 @@ public class NodeTagSyncTests
                 ["RabbitMQ:Password"] = "x",
             })
             .Build();
-        return new NodeService(db, NullLogger<NodeService>.Instance, config, new InMemoryTagMatcher(db));
+        return new NodeService(db, NullLogger<NodeService>.Instance, config,
+            new InMemoryTagMatcher(db),
+            new ClusterEnvCrypto(config, NullLogger<ClusterEnvCrypto>.Instance));
     }
 }

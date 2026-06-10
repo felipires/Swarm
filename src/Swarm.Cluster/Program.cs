@@ -61,6 +61,7 @@ builder.Services.AddSingleton<IConnection>(_ =>
 // in-memory LINQ matcher is the test/non-Postgres path, wired directly by tests.
 builder.Services.AddScoped<Swarm.Cluster.Services.Tags.ITagMatchStrategy,
     Swarm.Cluster.Services.Tags.PostgresJsonbTagMatcher>();
+builder.Services.AddSingleton<ClusterEnvCrypto>();
 builder.Services.AddScoped<NodeService>();
 builder.Services.AddScoped<EntityVersionService>();
 builder.Services.AddScoped<TaskDispatchService>();

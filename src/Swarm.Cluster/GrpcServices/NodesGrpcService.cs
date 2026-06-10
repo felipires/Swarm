@@ -101,6 +101,7 @@ public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.Node
                 Kind = op.Op == Models.NodeEnvOp.EnvOpKind.Set ? EnvOpKind.Set : EnvOpKind.DeleteKey,
                 Key = op.Key,
                 Value = op.Value ?? string.Empty,
+                IsSecret = op.IsSecret,
             });
         }
 

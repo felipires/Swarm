@@ -236,6 +236,7 @@ function EnvSecrets({ node }: { node: Node }) {
   const queryClient = useQueryClient();
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+  const [isSecret, setIsSecret] = useState(true);
   const envKey = queryKeys.nodeEnv(node.id);
 
   const query = useQuery({
@@ -247,7 +248,7 @@ function EnvSecrets({ node }: { node: Node }) {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: envKey });
 
   const setEnv = useMutation({
-    mutationFn: () => apiClient.setNodeEnv(node.id, key.trim(), value),
+    mutationFn: () => apiClient.setNodeEnv(node.id, key.trim(), value, isSecret),
     onSuccess: () => {
       setKey("");
       setValue("");
@@ -303,14 +304,23 @@ function EnvSecrets({ node }: { node: Node }) {
           aria-label="Env key"
         />
         <input
-          type="password"
+          type={isSecret ? "password" : "text"}
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="value (encrypted on node)"
+          placeholder={isSecret ? "value (encrypted on node)" : "value (plaintext config)"}
           autoComplete="off"
           className={`${inputClass} w-52`}
           aria-label="Env value"
         />
+        <label className="flex cursor-pointer items-center gap-1.5 select-none text-xs text-[var(--swarm-muted)]">
+          <input
+            type="checkbox"
+            checked={isSecret}
+            onChange={(e) => setIsSecret(e.target.checked)}
+            className="accent-[var(--swarm-primary)]"
+          />
+          Secret
+        </label>
         <button
           type="submit"
           disabled={!key.trim() || setEnv.isPending}
@@ -321,8 +331,8 @@ function EnvSecrets({ node }: { node: Node }) {
         </button>
       </form>
       <p className="text-xs text-[var(--swarm-muted)]">
-        Values are encrypted on the node and never stored in plaintext by the cluster.
-        The list shows keys still pending delivery, not the node's full applied set.
+        Secret values are encrypted on the node (Tier 2). Non-secret values are stored plaintext (Tier 3 config).
+        The list shows all applied keys, not pending values.
       </p>
     </div>
   );

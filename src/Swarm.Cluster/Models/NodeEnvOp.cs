@@ -1,16 +1,18 @@
 namespace Swarm.Cluster.Models;
 
 /// <summary>
-/// Pending task-config env mutation that the Cluster relays to a Node on its
-/// next heartbeat (P1-5a). The Cluster stores plaintext values briefly — they
-/// are deleted once the Node acks the operation in a subsequent heartbeat.
+/// Task-config env key record and pending mutation relay (P1-5a).
 ///
-/// This is a pragmatic departure from the roadmap's "Cluster never holds
-/// plaintext" rule: the alternative is a gRPC server on the Node (requires
-/// Web SDK conversion + inbound connectivity), which is out of scope for
-/// the deferred-items batch. The window is bounded by heartbeat interval
-/// (default 30s); operators who care can run a Cluster-side encryption-at-
-/// rest layer (e.g. Postgres TDE) underneath.
+/// Lifecycle for Set ops: the Value is encrypted at rest on the Cluster
+/// (<see cref="IsSecret"/> = true) or stored plaintext (false). On delivery
+/// the Node applies the value; on ack the Cluster nulls <see cref="Value"/>
+/// and keeps the row permanently as a key-name inventory record.
+/// Lifecycle for Delete ops: row is removed entirely once acked.
+///
+/// <see cref="IsSecret"/> = true → Cluster encrypts Value (AES-256-GCM,
+/// <c>Env:EncryptionKey</c>), Node stores in <c>EnvSecretsStore</c> (Tier 2).
+/// <see cref="IsSecret"/> = false → plaintext both sides, Node stores in
+/// <c>PlaintextConfigStore</c> (Tier 3 — feature flags, non-secret URLs).
 /// </summary>
 public class NodeEnvOp
 {
@@ -22,8 +24,16 @@ public class NodeEnvOp
 
     public string Key { get; set; } = null!;
 
-    /// <summary>Non-null for <see cref="EnvOpKind.Set"/>; ignored for Delete.</summary>
+    /// <summary>Non-null for <see cref="EnvOpKind.Set"/>; ignored for Delete.
+    /// Nulled out after the Node acks the op — the row is kept as a key-name
+    /// inventory record.</summary>
     public string? Value { get; set; }
+
+    /// <summary>When true the value is encrypted at rest on the Cluster and
+    /// the Node stores it in its encrypted <c>EnvSecretsStore</c> (Tier 2).
+    /// When false the value is stored plaintext on both sides (Tier 3 — for
+    /// non-secret operational config like feature flags or base URLs).</summary>
+    public bool IsSecret { get; set; } = true;
 
     public DateTime CreatedAt { get; set; }
 

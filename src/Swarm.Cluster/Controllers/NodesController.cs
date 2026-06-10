@@ -97,8 +97,8 @@ public class NodesController : ControllerBase
         if (string.IsNullOrEmpty(body.Key))
             return BadRequest(new ApiError("INVALID_KEY", "Key is required"));
 
-        var op = await _nodeService.EnqueueEnvOpAsync(id, NodeEnvOp.EnvOpKind.Set, body.Key, body.Value);
-        return Accepted(new { opId = op.Id, key = op.Key });
+        var op = await _nodeService.EnqueueEnvOpAsync(id, NodeEnvOp.EnvOpKind.Set, body.Key, body.Value, body.IsSecret);
+        return Accepted(new { opId = op.Id, key = op.Key, isSecret = op.IsSecret });
     }
 
     [HttpDelete("{id}/env/{key}")]
@@ -111,7 +111,7 @@ public class NodesController : ControllerBase
     [HttpGet("{id}/env")]
     public async Task<ActionResult<List<string>>> ListEnvSecrets(Guid id)
     {
-        var keys = await _nodeService.ListPendingEnvKeysAsync(id);
+        var keys = await _nodeService.ListEnvKeysAsync(id);
         return Ok(keys);
     }
 
@@ -146,4 +146,4 @@ public record UpdateOverlayTagsRequest(
     Dictionary<string, string>? Add = null,
     List<string>? Remove = null);
 
-public record SetEnvSecretRequest(string Key, string Value);
+public record SetEnvSecretRequest(string Key, string Value, bool IsSecret = true);

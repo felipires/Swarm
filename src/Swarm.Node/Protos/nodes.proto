@@ -83,6 +83,9 @@ message EnvOp {
   string key = 3;
   // Value present for Set; ignored for DeleteKey.
   string value = 4;
+  // When true the Node stores the value in EnvSecretsStore (Tier 2).
+  // When false the Node stores it in PlaintextConfigStore (Tier 3).
+  bool is_secret = 5;
 }
 
 enum EnvOpKind {

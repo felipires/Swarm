@@ -13,6 +13,7 @@ public class HeartBeatService(
     RegistrationService registrationService,
     NodeTagState tagState,
     EnvSecretsStore envSecrets,
+    PlaintextConfigStore plaintextConfig,
     NodeMetricsCollector metricsCollector,
     IServiceProvider serviceProvider)
 {
@@ -23,6 +24,7 @@ public class HeartBeatService(
     private readonly RegistrationService _registrationService = registrationService;
     private readonly NodeTagState _tagState = tagState;
     private readonly EnvSecretsStore _envSecrets = envSecrets;
+    private readonly PlaintextConfigStore _plaintextConfig = plaintextConfig;
     private readonly NodeMetricsCollector _metricsCollector = metricsCollector;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
@@ -74,7 +76,7 @@ public class HeartBeatService(
                         _ => HealthStatus.Healthy,
                     },
                 };
-                _logger.LogInformation("Metrics sent to cluster {metrics}", JsonSerializer.Serialize(request.Metrics));
+                _logger.LogDebug("Metrics sent to cluster {metrics}", JsonSerializer.Serialize(request.Metrics));
             }
             catch (Exception ex)
             {
@@ -124,9 +126,17 @@ public class HeartBeatService(
             try
             {
                 if (op.Kind == EnvOpKind.Set)
-                    await _envSecrets.SetAsync(op.Key, op.Value);
+                {
+                    if (op.IsSecret)
+                        await _envSecrets.SetAsync(op.Key, op.Value);
+                    else
+                        await _plaintextConfig.SetAsync(op.Key, op.Value);
+                }
                 else
+                {
                     await _envSecrets.DeleteAsync(op.Key);
+                    await _plaintextConfig.DeleteAsync(op.Key);
+                }
 
                 lock (_pendingAcks) _pendingAcks.Add(op.Id);
                 _logger.LogInformation(

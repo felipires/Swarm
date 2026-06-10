@@ -16,14 +16,17 @@ public class NodeService
     private readonly ILogger<NodeService> _logger;
     private readonly IConfiguration _config;
     private readonly Tags.ITagMatchStrategy _tagMatcher;
+    private readonly ClusterEnvCrypto _crypto;
     private readonly int _heartbeatTimeoutSeconds;
 
-    public NodeService(ClusterDbContext dbContext, ILogger<NodeService> logger, IConfiguration config, Tags.ITagMatchStrategy tagMatcher)
+    public NodeService(ClusterDbContext dbContext, ILogger<NodeService> logger, IConfiguration config,
+        Tags.ITagMatchStrategy tagMatcher, ClusterEnvCrypto crypto)
     {
         _dbContext = dbContext;
         _logger = logger;
         _config = config;
         _tagMatcher = tagMatcher;
+        _crypto = crypto;
         _heartbeatTimeoutSeconds = config.GetValue<int>("Heartbeat:TimeoutSeconds", 300);
     }
 
@@ -301,13 +304,19 @@ public class NodeService
 
     /// <summary>
     /// Queue an env op (Set or Delete) for the next heartbeat to deliver.
+    /// Secret values are encrypted at rest via <see cref="ClusterEnvCrypto"/>.
     /// Multiple ops for the same key are kept in submission order — the Node
     /// applies them as a sequence. P1-5a.
     /// </summary>
-    public async Task<NodeEnvOp> EnqueueEnvOpAsync(Guid nodeId, NodeEnvOp.EnvOpKind op, string key, string? value)
+    public async Task<NodeEnvOp> EnqueueEnvOpAsync(
+        Guid nodeId, NodeEnvOp.EnvOpKind op, string key, string? value, bool isSecret = true)
     {
         if (!await _dbContext.Nodes.AnyAsync(n => n.Id == nodeId))
             throw new InvalidOperationException($"Node {nodeId} not found");
+
+        string? storedValue = null;
+        if (op == NodeEnvOp.EnvOpKind.Set && value is not null)
+            storedValue = isSecret ? _crypto.Encrypt(value) : value;
 
         var row = new NodeEnvOp
         {
@@ -315,7 +324,8 @@ public class NodeService
             NodeId = nodeId,
             Op = op,
             Key = key,
-            Value = op == NodeEnvOp.EnvOpKind.Set ? value : null,
+            Value = storedValue,
+            IsSecret = isSecret,
             CreatedAt = DateTime.UtcNow,
         };
         _dbContext.NodeEnvOps.Add(row);
@@ -325,52 +335,70 @@ public class NodeService
 
     /// <summary>
     /// Drain a batch of pending env ops for delivery in a heartbeat response.
-    /// Marks each as sent so they're not re-fired immediately, but keeps them
-    /// in the table until the Node acks via <see cref="AckEnvOpsAsync"/>.
-    /// Re-sent if not acked within the grace window.
+    /// Secret values are decrypted before being sent to the Node.
+    /// Marks each as sent; re-sends if not acked within the grace window.
+    /// Already-applied Set ops (Value == null) are excluded.
     /// </summary>
     public async Task<List<NodeEnvOp>> DrainEnvOpsForHeartbeatAsync(Guid nodeId)
     {
         var resendCutoff = DateTime.UtcNow.AddSeconds(-30);
         var pending = await _dbContext.NodeEnvOps
             .Where(o => o.NodeId == nodeId
-                        && (o.LastSentAt == null || o.LastSentAt < resendCutoff))
+                        && (o.LastSentAt == null || o.LastSentAt < resendCutoff)
+                        && !(o.Op == NodeEnvOp.EnvOpKind.Set && o.Value == null))
             .OrderBy(o => o.CreatedAt)
             .Take(50)
             .ToListAsync();
 
         if (pending.Count == 0) return pending;
 
+        // Decrypt in memory before returning — the caller sends the plaintext
+        // value to the Node; the encrypted blob stays in the DB until acked.
+        foreach (var op in pending)
+        {
+            if (op.Op == NodeEnvOp.EnvOpKind.Set && op.IsSecret && op.Value is not null)
+                op.Value = _crypto.Decrypt(op.Value);
+        }
+
         var now = DateTime.UtcNow;
-        foreach (var op in pending) op.LastSentAt = now;
-        await _dbContext.SaveChangesAsync();
+        // Re-fetch to update LastSentAt without the in-memory decrypted values.
+        var ids = pending.Select(o => o.Id).ToList();
+        await _dbContext.NodeEnvOps
+            .Where(o => ids.Contains(o.Id))
+            .ExecuteUpdateAsync(s => s.SetProperty(o => o.LastSentAt, now));
+
         return pending;
     }
 
     /// <summary>
-    /// Delete acked env ops (the Node confirmed they were applied).
+    /// Handle acked env ops. Set ops have their Value nulled (becomes a
+    /// permanent key-name inventory record). Delete ops are removed entirely.
     /// </summary>
     public async Task AckEnvOpsAsync(Guid nodeId, IReadOnlyList<Guid> opIds)
     {
         if (opIds.Count == 0) return;
-        var toDelete = await _dbContext.NodeEnvOps
+        var ops = await _dbContext.NodeEnvOps
             .Where(o => o.NodeId == nodeId && opIds.Contains(o.Id))
             .ToListAsync();
-        if (toDelete.Count == 0) return;
-        _dbContext.NodeEnvOps.RemoveRange(toDelete);
+        if (ops.Count == 0) return;
+        foreach (var op in ops)
+        {
+            if (op.Op == NodeEnvOp.EnvOpKind.Set)
+                op.Value = null; // drop ciphertext/plaintext, keep as key inventory
+            else
+                _dbContext.NodeEnvOps.Remove(op);
+        }
         await _dbContext.SaveChangesAsync();
     }
 
     /// <summary>
-    /// List the keys currently pending delivery to a Node. Does not include
-    /// keys the Node has already applied — operators wanting authoritative
-    /// state must read the Node directly until heartbeat-reported key sets
-    /// land.
+    /// Authoritative list of env keys the Node currently holds (applied Set ops).
+    /// Delete ops in flight are excluded.
     /// </summary>
-    public async Task<List<string>> ListPendingEnvKeysAsync(Guid nodeId)
+    public async Task<List<string>> ListEnvKeysAsync(Guid nodeId)
     {
         return await _dbContext.NodeEnvOps
-            .Where(o => o.NodeId == nodeId)
+            .Where(o => o.NodeId == nodeId && o.Op == NodeEnvOp.EnvOpKind.Set)
             .Select(o => o.Key)
             .Distinct()
             .ToListAsync();
