@@ -26,7 +26,7 @@ Returns a newest-first, cursor-paginated page of logs.
 |---|---|---|
 | `nodeId` | uuid | Filter to one origin node |
 | `tags` | string (repeatable) | `key:value` tag facet, AND-combined. Arbitrary keys, e.g. `tags=run:<id>&tags=env.DB:prod`. Backed by a jsonb containment (`@>`) GIN index |
-| `level` | string (repeatable) | Concrete level names to include, e.g. `level=Warning&level=Error` |
+| `level` | string (repeatable) | Concrete level names to include, e.g. `level=Warning&level=Error`. The query bar also accepts `level:>Warning` (Warning and above) and `level:<Error` (Error and below) which expand to multiple values before sending |
 | `q` | string | Free-text substring match over `message` and `messageTemplate` (pg_trgm) |
 | `from` / `to` | string | UTC time-range bounds (ISO 8601) |
 | `after` | string | Opaque cursor from a previous response's `nextCursor` |

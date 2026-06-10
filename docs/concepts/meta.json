@@ -8,6 +8,7 @@
     "dispatch-strategies",
     "tags",
     "retry-policy",
-    "config-placeholders"
+    "config-placeholders",
+    "observability"
   ]
 }

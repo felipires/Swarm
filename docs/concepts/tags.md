@@ -51,6 +51,10 @@ curl -X PATCH http://localhost:5001/api/nodes/<nodeId>/tags \
 
 The response is the full effective overlay tag set after the change. The Node receives the updated effective set on its next heartbeat acknowledgement.
 
+## Tags in log search
+
+Node routing tags are automatically merged into every log row at ingest time. This means you can search logs by the same facets you use for routing — `region:eu`, `env:prod`, `tier:premium` — without any extra configuration. See [Observability](./observability.md) for details.
+
 ## Tag discovery on the Node
 
 Configure static tags via environment variables:
