@@ -14,4 +14,7 @@ export const queryKeys = {
   taskInstance: (instanceId: string) => ["tasks", "instances", instanceId] as const,
   taskVersions: (id: string) => ["tasks", id, "versions"] as const,
   pipelineSchedules: (pipelineId: string) => ["pipelines", pipelineId, "schedules"] as const,
+  // Log search — keyed by the structured params so each distinct query/filter
+  // set is cached independently.
+  logs: (params: unknown) => ["logs", params] as const,
 };

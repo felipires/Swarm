@@ -8,6 +8,13 @@ using Swarm.Sdk.Wire;
 namespace Swarm.Cluster.Services;
 
 /// <summary>
+/// Pipeline correlation for a step dispatch. Carried into the wire
+/// <see cref="TaskMessage"/> so the Node can tag its logs with run / step /
+/// pipeline ids (observability v2). Null for standalone (non-pipeline) dispatches.
+/// </summary>
+public record PipelineDispatchContext(Guid RunId, Guid StepId, Guid PipelineId);
+
+/// <summary>
 /// Records a dispatch decision atomically. Inserts the <see cref="TaskInstance"/>
 /// and a matching <see cref="PendingDispatch"/> row inside one DB transaction
 /// (roadmap P0-4 outbox pattern). The actual RabbitMQ publish runs out-of-band
@@ -57,7 +64,8 @@ public class TaskDispatchService
         Guid? nodeId = null,
         DispatchStrategy? strategy = null,
         IReadOnlyDictionary<string, string>? targetTags = null,
-        string? runtimeParamsJson = null)
+        string? runtimeParamsJson = null,
+        PipelineDispatchContext? pipeline = null)
     {
         var definition = await _dbContext.TaskDefinitions.FindAsync(taskDefinitionId)
             ?? throw new InvalidOperationException($"TaskDefinition {taskDefinitionId} not found");
@@ -72,16 +80,16 @@ public class TaskDispatchService
         return effectiveStrategy switch
         {
             DispatchStrategy.SpecificNode  => await DispatchToSpecificAsync(definition, nodeId
-                ?? throw new InvalidOperationException("SpecificNode strategy requires a NodeId"), runtimeParamsJson),
-            DispatchStrategy.AnyOnlineNode => await DispatchToSharedAsync(definition, runtimeParamsJson),
-            DispatchStrategy.TaggedNodes   => await DispatchTaggedAsync(definition, effectiveTags, runtimeParamsJson),
+                ?? throw new InvalidOperationException("SpecificNode strategy requires a NodeId"), runtimeParamsJson, pipeline),
+            DispatchStrategy.AnyOnlineNode => await DispatchToSharedAsync(definition, runtimeParamsJson, pipeline),
+            DispatchStrategy.TaggedNodes   => await DispatchTaggedAsync(definition, effectiveTags, runtimeParamsJson, pipeline),
             DispatchStrategy.AllOnlineNodes => throw new InvalidOperationException(
                 "AllOnlineNodes is a broadcast strategy — use DispatchToAllOnlineAsync instead"),
             _ => throw new InvalidOperationException($"Unknown dispatch strategy {effectiveStrategy}"),
         };
     }
 
-    private async Task<TaskInstance> DispatchToSpecificAsync(TaskDefinition definition, Guid nodeId, string? runtimeParamsJson = null)
+    private async Task<TaskInstance> DispatchToSpecificAsync(TaskDefinition definition, Guid nodeId, string? runtimeParamsJson = null, PipelineDispatchContext? pipeline = null)
     {
         var node = await _dbContext.Nodes.FindAsync(nodeId)
             ?? throw new InvalidOperationException($"Node {nodeId} not found");
@@ -89,13 +97,13 @@ public class TaskDispatchService
             throw new InvalidOperationException($"Node {nodeId} is not online");
 
         var instance = NewInstance(definition, nodeId, runtimeParamsJson);
-        await PersistDispatchAsync(instance, definition, TaskQueueName(nodeId));
+        await PersistDispatchAsync(instance, definition, TaskQueueName(nodeId), pipeline);
         _logger.LogInformation(
             "Enqueued task instance {InstanceId} for dispatch to node {NodeId}", instance.Id, nodeId);
         return instance;
     }
 
-    private async Task<TaskInstance> DispatchToSharedAsync(TaskDefinition definition, string? runtimeParamsJson)
+    private async Task<TaskInstance> DispatchToSharedAsync(TaskDefinition definition, string? runtimeParamsJson, PipelineDispatchContext? pipeline = null)
     {
         // Sanity: at least one Online Node must advertise the TaskType.
         // Without this check the message would sit in the shared queue forever.
@@ -107,14 +115,14 @@ public class TaskDispatchService
                 $"No online Node currently advertises TaskType '{definition.TaskType}'");
 
         var instance = NewInstance(definition, nodeId: null, runtimeParamsJson);
-        await PersistDispatchAsync(instance, definition, SharedQueueName(definition.TaskType));
+        await PersistDispatchAsync(instance, definition, SharedQueueName(definition.TaskType), pipeline);
         _logger.LogInformation(
             "Enqueued task instance {InstanceId} on shared queue for TaskType {TaskType}",
             instance.Id, definition.TaskType);
         return instance;
     }
 
-    private async Task<TaskInstance> DispatchTaggedAsync(TaskDefinition definition, IReadOnlyDictionary<string, string>? tags, string? runtimeParamsJson)
+    private async Task<TaskInstance> DispatchTaggedAsync(TaskDefinition definition, IReadOnlyDictionary<string, string>? tags, string? runtimeParamsJson, PipelineDispatchContext? pipeline = null)
     {
         if (tags is null || tags.Count == 0)
             throw new InvalidOperationException("TaggedNodes strategy requires a non-empty tag selector");
@@ -152,7 +160,7 @@ public class TaskDispatchService
         }
 
         var instance = NewInstance(definition, nodeId: null, runtimeParamsJson);
-        await PersistDispatchAsync(instance, definition, queueName);
+        await PersistDispatchAsync(instance, definition, queueName, pipeline);
         _logger.LogInformation(
             "Enqueued instance {InstanceId} on tagged shared queue {Queue} (selector {Selector}, {Count} eligible Node(s))",
             instance.Id, queueName, canonical, eligible.Count);
@@ -268,9 +276,9 @@ public class TaskDispatchService
         CreatedAt = DateTime.UtcNow,
     };
 
-    private async Task PersistDispatchAsync(TaskInstance instance, TaskDefinition definition, string queueName)
+    private async Task PersistDispatchAsync(TaskInstance instance, TaskDefinition definition, string queueName, PipelineDispatchContext? pipeline = null)
     {
-        var message = BuildMessage(instance);
+        var message = BuildMessage(instance, pipeline);
         var pending = new PendingDispatch
         {
             Id = Guid.NewGuid(),
@@ -292,7 +300,7 @@ public class TaskDispatchService
     /// snapshot is captured at dispatch time so what the Node sees is
     /// immune to subsequent definition edits.
     /// </summary>
-    internal static TaskMessage BuildMessage(TaskInstance instance) => new()
+    internal static TaskMessage BuildMessage(TaskInstance instance, PipelineDispatchContext? pipeline = null) => new()
     {
         InstanceId = instance.Id,
         TaskDefinitionId = instance.TaskDefinitionId,
@@ -300,6 +308,9 @@ public class TaskDispatchService
         TaskType = instance.TaskType,
         ConfigJson = instance.ConfigJsonSnapshot,
         RuntimeParamsJson = instance.RuntimeParamsJson,
+        PipelineRunId = pipeline?.RunId,
+        PipelineStepId = pipeline?.StepId,
+        PipelineId = pipeline?.PipelineId,
     };
 
     private static Dictionary<string, string>? ParseTags(string? json)

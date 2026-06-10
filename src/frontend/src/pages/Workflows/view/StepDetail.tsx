@@ -5,6 +5,7 @@ import { apiClient } from "../../../services/api";
 import { queryKeys } from "../../../services/queryKeys";
 import type { PipelineStep, PipelineStepInstance } from "../../../store/store";
 import { absoluteTime, duration } from "../../../utils/time";
+import { LogResults } from "../../Observability/LogResults";
 import { isStepActive, STEP_STATUS_TONE } from "./stepStatus";
 
 interface StepDetailProps {
@@ -156,6 +157,19 @@ export function StepDetail({ step, taskName, instance, allSteps, onClose }: Step
                 </p>
               )
             )}
+
+            <div>
+              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--swarm-muted)]">
+                Logs
+              </p>
+              <div className="h-48 overflow-hidden rounded-md border border-[var(--swarm-border)]">
+                <LogResults
+                  params={{ tags: [`step:${step.id}`] }}
+                  refetchMs={isStepActive(instance.status) ? 5_000 : 0}
+                  emptyHint="No logs for this step yet."
+                />
+              </div>
+            </div>
           </>
         )}
       </div>

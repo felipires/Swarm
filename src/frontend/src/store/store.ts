@@ -230,14 +230,31 @@ export interface CapabilityCatalogEntry {
 
 export type LogLevel = "Debug" | "Information" | "Warning" | "Error" | "Critical";
 
-/** Matches the SSE payload emitted by LogsController.WriteLogAsync:
- *  { id, nodeId, level, message, timestamp, exception }. `level` is a free-form
- *  string from the worker's logger, so consumers must tolerate unknown values. */
-export interface LogEntry {
+/** A persisted log row from the search endpoint (`GET /api/logs`). `level` is a
+ *  free-form string from the worker's logger, so consumers must tolerate unknown
+ *  values. `tags` is the correlation/context map (task / run / step / pipeline /
+ *  env.*) used for faceted filtering and clickable chips. */
+export interface LogRecord {
   id: string;
-  nodeId: string;
+  nodeId?: string | null;
   level: string;
-  message: string;
-  timestamp: string;
+  messageTemplate: string;
+  message?: string | null;
   exception?: string | null;
+  tags?: Record<string, string> | null;
+  timestamp: string;
+}
+
+/** Structured filters for the log search endpoint. */
+export interface LogQueryParams {
+  /** Repeated `key:value` tag facets, AND-combined (e.g. ["run:abc","level…"]). */
+  tags?: string[];
+  /** Concrete level names to include (e.g. ["Warning","Error"]). */
+  level?: string[];
+  /** Free-text substring over message and template. */
+  q?: string;
+  nodeId?: string;
+  /** ISO UTC bounds. */
+  from?: string;
+  to?: string;
 }

@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
-using Swarm.Cluster.Services;
+using Microsoft.EntityFrameworkCore;
+using Swarm.Cluster.Data;
+using Swarm.Cluster.Models;
+using Swarm.Cluster.Models.Dto;
 
 namespace Swarm.Cluster.Controllers;
 
@@ -8,84 +11,111 @@ namespace Swarm.Cluster.Controllers;
 [Route("api/[controller]")]
 public class LogsController : ControllerBase
 {
-    private readonly LogConsumerService _logConsumerService;
-    private readonly ILogger<LogsController> _logger;
+    private readonly ClusterDbContext _db;
 
-    public LogsController(LogConsumerService logConsumerService, ILogger<LogsController> logger)
-    {
-        _logConsumerService = logConsumerService;
-        _logger = logger;
-    }
+    public LogsController(ClusterDbContext db) => _db = db;
 
     /// <summary>
-    /// Streams the buffered logs for a specific node using Server-Sent Events.
+    /// Persistent, paginated log search (observability v2 — replaces SSE
+    /// streaming). Filters: <c>nodeId</c>; repeated <c>tags=key:value</c>
+    /// (AND-combined jsonb containment, incl. arbitrary keys like
+    /// <c>env.DB:prod</c>); repeated <c>level</c>; <c>q</c> free text
+    /// (substring over message and template, pg_trgm-backed); <c>from</c>/<c>to</c>
+    /// UTC range. Ordered newest-first with an opaque <c>(Timestamp, Id)</c>
+    /// keyset cursor (<c>after</c>).
     /// </summary>
-    /// <param name="nodeId">The node ID to stream logs for</param>
-    [HttpGet("stream/{nodeId}")]
-    public async Task StreamLogs(Guid nodeId, CancellationToken cancellationToken)
+    [HttpGet]
+    public async Task<ActionResult> Search(
+        [FromQuery] Guid? nodeId,
+        [FromQuery(Name = "tags")] string[]? tags,
+[FromQuery(Name = "level")] string[]? level,
+        [FromQuery] string? q,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? after,
+        [FromQuery] int? limit,
+        CancellationToken cancellationToken)
     {
-        Response.Headers["Content-Type"] = "text/event-stream";
-        Response.Headers["Cache-Control"] = "no-cache";
-        Response.Headers["Connection"] = "keep-alive";
+        IQueryable<Log> query = _db.Logs;
 
-        // Disable buffering so each event is flushed to the client immediately
-        var bufferingFeature = Response.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>();
-        bufferingFeature?.DisableBuffering();
+        if (nodeId is { } nid)
+            query = query.Where(l => l.NodeId == nid);
 
-        // Replay recent buffered logs so the UI isn't blank on connect
-        foreach (var log in _logConsumerService.GetRecentLogsForNode(nodeId))
-            await WriteLogAsync(log, cancellationToken);
+        if (level is { Length: > 0 })
+            query = query.Where(l => level.Contains(l.Level));
 
-        var channel = _logConsumerService.Subscribe(nodeId);
-        try
+        if (from is { } f)
         {
-            _logger.LogInformation("SSE client connected for node {NodeId}", nodeId);
-
-            // Initial ping so the browser fires onopen immediately
-            await Response.WriteAsync(": connected\n\n", cancellationToken);
-            await Response.Body.FlushAsync(cancellationToken);
-            await foreach (var log in channel.Reader.ReadAllAsync(cancellationToken))
-                await WriteLogAsync(log, cancellationToken);
+            var fUtc = DateTime.SpecifyKind(f, DateTimeKind.Utc);
+            query = query.Where(l => l.Timestamp >= fUtc);
         }
-        catch (OperationCanceledException) { }
-        finally
+        if (to is { } t)
         {
-            _logConsumerService.Unsubscribe(nodeId, channel);
-            _logger.LogInformation("SSE client disconnected for node {NodeId}", nodeId);
+            var tUtc = DateTime.SpecifyKind(t, DateTimeKind.Utc);
+            query = query.Where(l => l.Timestamp <= tUtc);
         }
+
+        // Tag facets → a single jsonb containment predicate `Tags @> @json`,
+        // served by the GIN(jsonb_path_ops) index. Supports arbitrary keys.
+        if (tags is { Length: > 0 })
+        {
+            var selector = new Dictionary<string, string>();
+            foreach (var pair in tags)
+            {
+                if (string.IsNullOrWhiteSpace(pair)) continue;
+                var sep = pair.IndexOf(':');
+                if (sep <= 0 || sep == pair.Length - 1)
+                    return BadRequest(new ApiError("INVALID_TAG", $"Tag '{pair}' must be in key:value form"));
+                selector[pair[..sep]] = pair[(sep + 1)..];
+            }
+            if (selector.Count > 0)
+            {
+                var selectorJson = JsonSerializer.Serialize(selector);
+                query = query.Where(l => l.Tags != null && EF.Functions.JsonContains(l.Tags, selectorJson));
+            }
+        }
+
+        // Free text → substring over message and template (pg_trgm GIN ILIKE).
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var like = $"%{EscapeLike(q.Trim())}%";
+            query = query.Where(l =>
+                (l.Message != null && EF.Functions.ILike(l.Message, like))
+                || EF.Functions.ILike(l.MessageTemplate, like));
+        }
+
+        if (!string.IsNullOrWhiteSpace(after))
+        {
+            if (!Cursor.TryDecode(after, out var key))
+                return BadRequest(new ApiError("INVALID_CURSOR", "The 'after' cursor is malformed"));
+            // Keyset boundary under (Timestamp DESC, Id DESC). Expanded form for
+            // reliable provider translation.
+            query = query.Where(l =>
+                l.Timestamp < key.CreatedAt
+                || (l.Timestamp == key.CreatedAt && l.Id.CompareTo(key.Id) < 0));
+        }
+
+        var take = limit is > 0 and <= PageRequest.MaxPageSize
+            ? limit.Value
+            : PageRequest.DefaultPageSize;
+
+        var rows = await query
+            .OrderByDescending(l => l.Timestamp)
+            .ThenByDescending(l => l.Id)
+            .Take(take + 1) // one extra to detect HasMore
+            .ToListAsync(cancellationToken);
+
+        var hasMore = rows.Count > take;
+        var page = hasMore ? rows.Take(take).ToList() : rows;
+        var nextCursor = hasMore && page.Count > 0
+            ? Cursor.Encode(new Cursor.Key(page[^1].Timestamp, page[^1].Id))
+            : null;
+
+        return Ok(new CursorPagedResult<LogResponse>(
+            page.Select(LogResponse.From).ToList(), nextCursor, hasMore));
     }
 
-    private async Task WriteLogAsync(Swarm.Cluster.Models.Log log, CancellationToken cancellationToken)
-    {
-        var payload = JsonSerializer.Serialize(new
-        {
-            id = log.Id,
-            nodeId = log.NodeId,
-            level = log.Level,
-            message = log.Message ?? log.MessageTemplate,
-            timestamp = log.Timestamp,
-            exception = log.Exception
-        });
-        await Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
-        await Response.Body.FlushAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Gets the current size of the log buffer for a specific node.
-    /// </summary>
-    /// <param name="nodeId">The node ID to check buffer size for</param>
-    [HttpGet("buffer-status/{nodeId}")]
-    public IActionResult GetBufferStatus(Guid nodeId)
-    {
-        try
-        {
-            var bufferSize = _logConsumerService.GetBufferSizeForNode(nodeId);
-            return Ok(new { nodeId, bufferSize });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting buffer status for node {NodeId}", nodeId);
-            return StatusCode(500, new { error = ex.Message });
-        }
-    }
+    /// <summary>Escape LIKE/ILIKE wildcards so user text is matched literally.</summary>
+    private static string EscapeLike(string input) =>
+        input.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 }

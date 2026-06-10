@@ -26,23 +26,23 @@ public partial class LogConsumerService : BackgroundService
 
     private readonly object _bufferLock = new();
     private readonly Dictionary<Guid, List<Log>> _logBuffer = new();
-    private readonly Dictionary<Guid, List<Log>> _latestLogsBuffer = new();
 
     // Per-node flush serialization (P2-2). One semaphore per node — a flush
     // in progress for node X never blocks node Y.
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _flushLocks = new();
 
+    // Cache node effective tags for 60 s — tags change rarely; avoids a SELECT
+    // on every flush cycle while staying fresh enough for routing-tag queries.
+    private readonly ConcurrentDictionary<Guid, (string? Tags, DateTime Expiry)> _nodeTagsCache = new();
+    private static readonly TimeSpan NodeTagsCacheTtl = TimeSpan.FromSeconds(60);
+
     // Consecutive flush-failure counter per node, used for exponential backoff
     // on the buffer-cap recovery path (P2-3).
     private readonly ConcurrentDictionary<Guid, int> _flushFailures = new();
 
-    // SSE subscribers: nodeId → list of channels waiting for new logs
-    private readonly Dictionary<Guid, List<System.Threading.Channels.Channel<Log>>> _subscribers = new();
-
     private const string LogQueueName = "logs";
     private const int BufferFlushIntervalMs = 5000;
     private const int MaxBufferSizePerNode = 1000;
-    private const int LatestLogsPerNodeToKeep = 100;
     // Hard cap on per-node buffer once flushes are persistently failing.
     // Older entries get dropped (FIFO) rather than growing memory unbounded (P2-3).
     private const int MaxBufferTotalCap = 5000;
@@ -104,30 +104,20 @@ public partial class LogConsumerService : BackgroundService
             var logEntry = ParseLogMessage(message, ea.BasicProperties);
             _logger.LogDebug("Received log from {nodeId}", logEntry?.NodeId);
 
-            if (logEntry != null)
+            if (logEntry?.NodeId is { } nodeId)
             {
                 lock (_bufferLock)
                 {
-                    if (!_logBuffer.TryGetValue(logEntry.NodeId, out List<Log>? value))
+                    if (!_logBuffer.TryGetValue(nodeId, out List<Log>? value))
                     {
                         value = new List<Log>();
-                        _logBuffer[logEntry.NodeId] = value;
-                        _latestLogsBuffer[logEntry.NodeId] = new List<Log>();
+                        _logBuffer[nodeId] = value;
                     }
 
                     value.Add(logEntry);
-                    _latestLogsBuffer[logEntry.NodeId].Add(logEntry);
-
-                    if (_latestLogsBuffer[logEntry.NodeId].Count > LatestLogsPerNodeToKeep)
-                        _latestLogsBuffer[logEntry.NodeId].RemoveAt(0);
 
                     if (value.Count >= MaxBufferSizePerNode)
-                        _ = FlushLogsForNodeAsync(logEntry.NodeId, _stoppingToken);
-
-                    // Push to SSE subscribers
-                    if (_subscribers.TryGetValue(logEntry.NodeId, out var subs))
-                        foreach (var sub in subs)
-                            sub.Writer.TryWrite(logEntry);
+                        _ = FlushLogsForNodeAsync(nodeId, _stoppingToken);
                 }
 
                 AckMessage(ea.DeliveryTag);
@@ -253,7 +243,8 @@ public partial class LogConsumerService : BackgroundService
                 Exception = exception,
                 Timestamp = timestamp,
                 CreatedAt = DateTime.UtcNow,
-                Properties = ExtractProperties(root)
+                Properties = ExtractProperties(root),
+                Tags = ExtractTags(root, isCompact)
             };
 
             return log;
@@ -319,6 +310,28 @@ public partial class LogConsumerService : BackgroundService
         return null;
     }
 
+    /// <summary>
+    /// Lift the node-enriched <c>SwarmTags</c> object (task / run / step /
+    /// pipeline / env.* correlation) into the Log's jsonb tags column. Compact
+    /// format carries it top-level; verbose format nests it under Properties.
+    /// </summary>
+    private static string? ExtractTags(JsonElement root, bool isCompact)
+    {
+        try
+        {
+            if (root.TryGetProperty("SwarmTags", out var tags) &&
+                tags.ValueKind == JsonValueKind.Object)
+                return tags.GetRawText();
+
+            if (!isCompact && root.TryGetProperty("Properties", out var props) &&
+                props.TryGetProperty("SwarmTags", out var nested) &&
+                nested.ValueKind == JsonValueKind.Object)
+                return nested.GetRawText();
+        }
+        catch { }
+        return null;
+    }
+
     private async Task FlushBufferPeriodically(CancellationToken cancellationToken)
     {
         try
@@ -373,6 +386,13 @@ public partial class LogConsumerService : BackgroundService
                 value.Clear();
             }
 
+            // Enrich each log with the node's current effective (routing) tags so
+            // facets like region:us-east work via the standard Tags @> containment
+            // path. Log-level SwarmTags (task/run/step/pipeline) win on key conflict.
+            var nodeEffectiveTags = await FetchNodeEffectiveTagsAsync(nodeId, cancellationToken);
+            if (nodeEffectiveTags != null)
+                EnrichLogsWithNodeTags(logsToFlush, nodeEffectiveTags);
+
             try
             {
                 await BulkInsertLogsAsync(logsToFlush, cancellationToken);
@@ -419,6 +439,60 @@ public partial class LogConsumerService : BackgroundService
         }
     }
 
+    private async Task<string?> FetchNodeEffectiveTagsAsync(Guid nodeId, CancellationToken ct)
+    {
+        if (_nodeTagsCache.TryGetValue(nodeId, out var cached) && cached.Expiry > DateTime.UtcNow)
+        {
+            return cached.Tags;
+        }
+
+        await using var conn = await _db.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT \"EffectiveTagsJson\" FROM \"Nodes\" WHERE \"Id\" = @id";
+        cmd.Parameters.Add(new NpgsqlParameter("id", nodeId));
+        var result = await cmd.ExecuteScalarAsync(ct);
+        var tags = result is DBNull or null ? null : (string?)result;
+        _nodeTagsCache[nodeId] = (tags, DateTime.UtcNow.Add(NodeTagsCacheTtl));
+        return tags;
+    }
+
+    /// <summary>
+    /// Merges node routing tags (base) with each log's existing SwarmTags (overlay).
+    /// Log-level correlation (task/run/step/pipeline) wins on key conflict so a node
+    /// tag named "task" can never shadow an actual task id.
+    /// </summary>
+    private static void EnrichLogsWithNodeTags(List<Log> logs, string nodeEffectiveTagsJson)
+    {
+        Dictionary<string, string>? nodeTags;
+        try { nodeTags = JsonSerializer.Deserialize<Dictionary<string, string>>(nodeEffectiveTagsJson); }
+        catch { return; }
+        if (nodeTags is null or { Count: 0 })
+        {
+            return;
+        }
+
+        foreach (var log in logs)
+        {
+            var merged = new Dictionary<string, string>(nodeTags, StringComparer.OrdinalIgnoreCase);
+            if (log.Tags != null)
+            {
+                try
+                {
+                    var existing = JsonSerializer.Deserialize<Dictionary<string, string>>(log.Tags);
+                    if (existing != null)
+                    {
+                        foreach (var (k, v) in existing)
+                        {
+                            merged[k] = v;
+                        }
+                    }
+                }
+                catch { }
+            }
+            log.Tags = JsonSerializer.Serialize(merged);
+        }
+    }
+
     private async Task BulkInsertLogsAsync(IReadOnlyList<Log> logs, CancellationToken cancellationToken)
     {
         await using var conn = await _db.OpenConnectionAsync(cancellationToken);
@@ -428,66 +502,27 @@ public partial class LogConsumerService : BackgroundService
         for (int i = 0; i < logs.Count; i++)
         {
             var log = logs[i];
-            int b = i * 7;
+            int b = i * 9;
             if (i > 0) valueClauses.Append(',');
-            valueClauses.Append($"(@n{b},@l{b},@mt{b},@m{b},@ex{b},@pr{b},@ts{b},@ca{b})");
+            valueClauses.Append($"(@n{b},@l{b},@mt{b},@m{b},@ex{b},@pr{b},@tg{b}::jsonb,@ts{b},@ca{b})");
 
-            cmd.Parameters.Add(new NpgsqlParameter($"n{b}", log.NodeId));
+            cmd.Parameters.Add(new NpgsqlParameter($"n{b}", (object?)log.NodeId ?? DBNull.Value));
             cmd.Parameters.Add(new NpgsqlParameter($"l{b}", log.Level));
             cmd.Parameters.Add(new NpgsqlParameter($"mt{b}", log.MessageTemplate));
             cmd.Parameters.Add(new NpgsqlParameter($"m{b}", (object?)log.Message ?? DBNull.Value));
             cmd.Parameters.Add(new NpgsqlParameter($"ex{b}", (object?)log.Exception ?? DBNull.Value));
             cmd.Parameters.Add(new NpgsqlParameter($"pr{b}", (object?)log.Properties ?? DBNull.Value));
+            cmd.Parameters.Add(new NpgsqlParameter($"tg{b}", (object?)log.Tags ?? DBNull.Value));
             cmd.Parameters.Add(new NpgsqlParameter($"ts{b}", log.Timestamp));
             cmd.Parameters.Add(new NpgsqlParameter($"ca{b}", log.CreatedAt));
         }
 
         cmd.CommandText =
-            "INSERT INTO \"Logs\" (\"Id\",\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Timestamp\",\"CreatedAt\") " +
+            "INSERT INTO \"Logs\" (\"Id\",\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Tags\",\"Timestamp\",\"CreatedAt\") " +
             "SELECT gen_random_uuid(), * FROM (VALUES " + valueClauses + ") " +
-            "AS v(\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Timestamp\",\"CreatedAt\")";
+            "AS v(\"NodeId\",\"Level\",\"MessageTemplate\",\"Message\",\"Exception\",\"Properties\",\"Tags\",\"Timestamp\",\"CreatedAt\")";
 
         await cmd.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    public int GetBufferSizeForNode(Guid nodeId)
-    {
-        lock (_bufferLock)
-        {
-            return _logBuffer.TryGetValue(nodeId, out List<Log>? value) ? value.Count : 0;
-        }
-    }
-
-    public List<Log> GetRecentLogsForNode(Guid nodeId)
-    {
-        lock (_bufferLock)
-        {
-            return _latestLogsBuffer.TryGetValue(nodeId, out var logs)
-                ? [.. logs]
-                : [];
-        }
-    }
-
-    public System.Threading.Channels.Channel<Log> Subscribe(Guid nodeId)
-    {
-        var channel = System.Threading.Channels.Channel.CreateUnbounded<Log>(
-            new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true });
-        lock (_bufferLock)
-        {
-            if (!_subscribers.ContainsKey(nodeId))
-                _subscribers[nodeId] = new List<System.Threading.Channels.Channel<Log>>();
-            _subscribers[nodeId].Add(channel);
-        }
-        return channel;
-    }
-
-    public void Unsubscribe(Guid nodeId, System.Threading.Channels.Channel<Log> channel)
-    {
-        lock (_bufferLock)
-        {
-            if (_subscribers.TryGetValue(nodeId, out var subs))
-                subs.Remove(channel);
-        }
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)

@@ -26,6 +26,16 @@ public record TaskMessage
     public string ConfigJson { get; init; } = "{}";
 
     public string? RuntimeParamsJson { get; init; }
+
+    /// <summary>
+    /// Pipeline correlation, set by the Cluster only when this task is a pipeline
+    /// step (null for standalone dispatches). The Node enriches its logs with
+    /// these so logs are searchable by run / step / pipeline without a cluster-side
+    /// lookup. Part of the wire contract — names appear verbatim in JSON.
+    /// </summary>
+    public Guid? PipelineRunId { get; init; }
+    public Guid? PipelineStepId { get; init; }
+    public Guid? PipelineId { get; init; }
 }
 
 /// <summary>

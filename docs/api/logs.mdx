@@ -6,91 +6,56 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 # Logs
 
-Node processes emit structured Serilog logs routed via RabbitMQ to the Cluster. The Cluster buffers the most recent ~1000 entries per node and fans them out to SSE subscribers.
+Node processes emit structured Serilog logs routed via RabbitMQ to the Cluster, which persists them to Postgres. Logs are searchable by free text, correlation **tags** (task / run / step / pipeline / `env.*`), and time range.
 
-## Stream logs (SSE)
-
-```
-GET /api/logs/stream/{nodeId}
-```
-
-Opens a Server-Sent Events stream for a specific node. On connect, the server immediately replays the buffered log history, then delivers new events as they arrive.
-
-### Connecting from a browser
-
-```ts
-const source = new EventSource(`/api/logs/stream/${nodeId}`);
-
-source.onmessage = (event) => {
-  const log = JSON.parse(event.data);
-  console.log(`[${log.level}] ${log.message}`);
-};
-
-source.onerror = () => {
-  // Connection dropped; reconnect logic here
-};
-```
-
-<Callout type="info" title="Vite proxy">
-In development, configure Vite to proxy `/api` to `http://localhost:5001` so relative URLs work correctly across the gRPC (5000) and REST (5001) ports.
+<Callout type="info" title="Streaming removed">
+The previous SSE endpoint (`GET /api/logs/stream/{nodeId}`) and `buffer-status` have been removed — a held connection per open tab did not scale. Use the paginated search endpoint below and poll it for near-live updates.
 </Callout>
 
-### Event data shape
+## Search logs
 
-```json
-{
-  "id": "h1i2j3k4-0001-0000-0000-000000000000",
-  "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
-  "level": "Information",
-  "message": "Task started: Ingest CSV on node worker-eu-1",
-  "timestamp": "2024-11-12T10:00:01.123Z",
-  "exception": null
-}
+```
+GET /api/logs
 ```
 
-| Field | Type | Description |
+Returns a newest-first, cursor-paginated page of logs.
+
+### Query parameters
+
+| Param | Type | Description |
 |---|---|---|
-| `id` | uuid | Log entry ID |
-| `nodeId` | uuid | Originating node |
-| `level` | string | `Debug` \| `Information` \| `Warning` \| `Error` \| `Critical` |
-| `message` | string | Rendered log message |
-| `timestamp` | string | UTC timestamp from the Node |
-| `exception` | string? | Stack trace if an exception was attached |
+| `nodeId` | uuid | Filter to one origin node |
+| `tags` | string (repeatable) | `key:value` tag facet, AND-combined. Arbitrary keys, e.g. `tags=run:<id>&tags=env.DB:prod`. Backed by a jsonb containment (`@>`) GIN index |
+| `level` | string (repeatable) | Concrete level names to include, e.g. `level=Warning&level=Error` |
+| `q` | string | Free-text substring match over `message` and `messageTemplate` (pg_trgm) |
+| `from` / `to` | string | UTC time-range bounds (ISO 8601) |
+| `after` | string | Opaque cursor from a previous response's `nextCursor` |
+| `limit` | int | Page size (default 50, max 200) |
 
-### Initial ping
+Well-known tag keys set by the system: `task` (TaskInstanceId), `taskDef`, `taskType`, `run` (PipelineRunId), `step` (PipelineStepId), `pipeline` (PipelineId), and `env.<KEY>` (opt-in via `Logging:LogTagEnvKeys` on the Node, non-secret values only).
 
-The server sends `: connected\n\n` immediately on connection so `EventSource.onopen` fires without waiting for the first log entry.
-
----
-
-## Buffer status
-
-```
-GET /api/logs/buffer-status/{nodeId}
-```
-
-Returns the current in-memory log buffer size for a node.
-
-**Response `200`:**
+### Response `200`
 
 ```json
 {
-  "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
-  "bufferSize": 342
+  "items": [
+    {
+      "id": "h1i2j3k4-0001-0000-0000-000000000000",
+      "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
+      "level": "Information",
+      "messageTemplate": "Task {InstanceId} completed",
+      "message": "Task 7f3a… completed",
+      "exception": null,
+      "tags": { "task": "7f3a…", "run": "9c2b…", "pipeline": "11de…" },
+      "timestamp": "2026-06-09T10:00:01.123Z"
+    }
+  ],
+  "nextCursor": "MTcwOTI…",
+  "hasMore": true
 }
 ```
 
----
-
-## Log correlation with tasks
-
-Log entries do not carry a `taskInstanceId`. To correlate logs with a specific task instance:
-
-1. Get the instance's `nodeId`, `dispatchedAt`, and `completedAt`
-2. Open the SSE stream for that node
-3. Filter client-side by timestamp range (`dispatchedAt` → `completedAt`)
-
-On failure, `instance.errorMessage` contains the top-level failure reason. The full stack trace appears in the SSE stream if the Node attached an exception.
+Cluster-origin pipeline lifecycle events (run started, step dispatched / completed / failed, run terminal) are written as logs too, tagged with `run`/`step`/`pipeline` and a null `nodeId`, so `tags=run:<id>` returns a complete orchestration + execution timeline.
 
 ---
 

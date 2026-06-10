@@ -1043,70 +1043,52 @@ The `SchedulerService` runs every `Scheduling:PollIntervalSeconds` (default
 
 ## Logs
 
-Node processes emit structured Serilog logs. These are routed via RabbitMQ to
-the Cluster's `LogConsumerService`, which buffers the most recent ~1000 entries
-per node and fans them out to SSE subscribers.
+Node processes emit structured Serilog logs, routed via RabbitMQ to the
+Cluster's `LogConsumerService`, which persists them to Postgres. Logs are
+searchable by free text, correlation **tags** (task / run / step / pipeline /
+`env.*`), and time range. SSE streaming was removed (a held connection per tab
+did not scale) — poll the search endpoint for near-live updates.
 
-### `GET /api/logs/stream/{nodeId}`
+### `GET /api/logs`
 
-Stream logs for a specific node using Server-Sent Events (SSE).
+Newest-first, cursor-paginated log search.
 
-**How to connect:**
+**Query parameters:**
 
-```ts
-const source = new EventSource("/api/logs/stream/{nodeId}");
-source.onmessage = (event) => {
-  const log = JSON.parse(event.data);
-  console.log(log);
-};
-```
-
-Use a relative URL (not `http://localhost:5001/...`) in browser environments
-using a Vite proxy — the gRPC port (5000) and REST port (5001) are separate
-listeners.
-
-**On connect:** the server replays all buffered logs for the node immediately
-(so the panel is not blank on first load), then delivers new logs as they
-arrive.
-
-**Event data shape:**
-
-```json
-{
-  "id": "h1i2j3k4-0001-0000-0000-000000000000",
-  "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
-  "level": "Information",
-  "message": "Task started: Ingest CSV on node worker-eu-1",
-  "timestamp": "2024-11-12T10:00:01.123Z",
-  "exception": null
-}
-```
-
-| Field | Type | Notes |
+| Param | Type | Notes |
 |---|---|---|
-| `id` | uuid | Log entry ID |
-| `nodeId` | uuid | Originating node |
-| `level` | string | `Debug` \| `Information` \| `Warning` \| `Error` \| `Critical` |
-| `message` | string | Rendered log message (falls back to `messageTemplate` if rendering fails) |
-| `timestamp` | string | UTC timestamp from the Node |
-| `exception` | string \| null | Stack trace if an exception was attached |
+| `nodeId` | uuid | Filter to one origin node |
+| `tags` | string (repeatable) | `key:value` tag facet, AND-combined; arbitrary keys (e.g. `tags=run:<id>&tags=env.DB:prod`). jsonb `@>` GIN-indexed |
+| `level` | string (repeatable) | Concrete level names, e.g. `level=Warning&level=Error` |
+| `q` | string | Substring over `message` and `messageTemplate` (pg_trgm) |
+| `from` / `to` | string | UTC range bounds (ISO 8601) |
+| `after` | string | Opaque cursor from a previous `nextCursor` |
+| `limit` | int | Page size (default 50, max 200) |
 
-**Initial ping event:** The server sends `: connected\n\n` immediately on
-connection so `EventSource.onopen` fires without waiting for the first log.
-
----
-
-### `GET /api/logs/buffer-status/{nodeId}`
-
-Get the current size of the in-memory log buffer for a node. Useful for
-diagnostics.
+System-set tag keys: `task` (TaskInstanceId), `taskDef`, `taskType`, `run`
+(PipelineRunId), `step` (PipelineStepId), `pipeline` (PipelineId), `env.<KEY>`
+(opt-in via the Node's `Logging:LogTagEnvKeys`, non-secret only). Pipeline
+lifecycle events are emitted as logs (null `nodeId`) tagged with
+`run`/`step`/`pipeline`, so `tags=run:<id>` yields a full run timeline.
 
 **Response `200`:**
 
 ```json
 {
-  "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
-  "bufferSize": 342
+  "items": [
+    {
+      "id": "h1i2j3k4-0001-0000-0000-000000000000",
+      "nodeId": "a3b4c5d6-0001-0000-0000-000000000000",
+      "level": "Information",
+      "messageTemplate": "Task {InstanceId} completed",
+      "message": "Task 7f3a… completed",
+      "exception": null,
+      "tags": { "task": "7f3a…", "run": "9c2b…", "pipeline": "11de…" },
+      "timestamp": "2026-06-09T10:00:01.123Z"
+    }
+  ],
+  "nextCursor": "MTcwOTI…",
+  "hasMore": true
 }
 ```
 
@@ -1274,20 +1256,16 @@ Cluster liveness check. Does not require authentication.
 ```
 1. Run is underway: runId known
 
-2. GET /api/pipelines/runs/{runId}/steps
-   → Find the dispatched step; get taskInstanceId and nodeId from
-     GET /api/tasks/instances/{taskInstanceId}
+2. GET /api/logs?tags=run:{runId}
+   → Full run timeline: cluster lifecycle events (run started, step
+     dispatched/completed/failed, run terminal) plus the node task logs,
+     all correlated by tag. Newest-first; poll for live updates.
 
-3. Open SSE stream:
-   const es = new EventSource("/api/logs/stream/{nodeId}");
-   → Receive buffered + live logs from that node
+3. Narrow to one step:        GET /api/logs?tags=step:{pipelineStepId}
+   Narrow by severity/text:   &level=Error&q=timeout
 
-4. Filter client-side by level or message to focus on the relevant task.
-   Log entries do not carry instanceId — correlate by timestamp range and
-   nodeId against the instance's dispatchedAt/completedAt window.
-
-5. On failure: instance.errorMessage has the top-level failure reason;
-   the SSE log stream will have the full stack trace if the Node attached it.
+4. On failure: instance.errorMessage has the top-level reason; the matching
+   log row carries the full stack trace in `exception` if the Node attached it.
 ```
 
 ---

@@ -71,6 +71,7 @@ public class PipelineRunExecutor
         var stepsSnapshot = JsonSerializer.Deserialize<List<StepSnapshot>>(run.StepsSnapshotJson)
             ?? new List<StepSnapshot>();
         var graph = BuildGraphFromSnapshot(stepsSnapshot);
+        var nameByStep = stepsSnapshot.ToDictionary(s => s.StepId, s => s.Name);
 
         // Reconcile each dispatched step's status from the underlying TaskInstance.
         foreach (var stepInstance in stepInstances.Where(s => s.Status == PipelineStepInstanceStatus.Dispatched))
@@ -84,12 +85,16 @@ public class PipelineRunExecutor
                     stepInstance.Status = PipelineStepInstanceStatus.Completed;
                     stepInstance.CompletedAt = task.CompletedAt;
                     stepInstance.ResultJson = task.ResultJson;
+                    EmitRunLog(run, stepInstance.PipelineStepId, task.NodeId, "Information",
+                        $"Step '{StepName(nameByStep, stepInstance.PipelineStepId)}' completed");
                     break;
 
                 case TaskInstance.TaskInstanceStatus.Failed:
                     stepInstance.Status = PipelineStepInstanceStatus.Failed;
                     stepInstance.CompletedAt = task.CompletedAt;
                     stepInstance.ErrorMessage = task.ErrorMessage;
+                    EmitRunLog(run, stepInstance.PipelineStepId, task.NodeId, "Error",
+                        $"Step '{StepName(nameByStep, stepInstance.PipelineStepId)}' failed: {task.ErrorMessage}");
                     HandleFailure(stepsSnapshot, stepInstance, stepInstances, graph);
                     break;
 
@@ -107,6 +112,9 @@ public class PipelineRunExecutor
         {
             run.Status = terminalStatus;
             run.CompletedAt = DateTime.UtcNow;
+            EmitRunLog(run, null, null,
+                terminalStatus == PipelineRunStatus.Completed ? "Information" : "Error",
+                $"Pipeline run {terminalStatus}");
             await _db.SaveChangesAsync(cancellationToken);
             _logger.LogInformation(
                 "Pipeline run {RunId} reached terminal status {Status}", run.Id, terminalStatus);
@@ -123,7 +131,47 @@ public class PipelineRunExecutor
     /// after the run row + waiting step instances are persisted.
     /// </summary>
     public async Task DispatchRootsAsync(Guid pipelineRunId, CancellationToken cancellationToken)
-        => await AdvanceAsync(pipelineRunId, cancellationToken);
+    {
+        var run = await _db.PipelineRuns.FirstOrDefaultAsync(r => r.Id == pipelineRunId, cancellationToken);
+        if (run is not null)
+        {
+            EmitRunLog(run, null, null, "Information", "Pipeline run started");
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        await AdvanceAsync(pipelineRunId, cancellationToken);
+    }
+
+    private static string StepName(IReadOnlyDictionary<Guid, string> nameByStep, Guid stepId)
+        => nameByStep.TryGetValue(stepId, out var name) ? name : stepId.ToString();
+
+    /// <summary>
+    /// Stage a cluster-origin lifecycle Log row (observability v2) tagged with
+    /// run / step / pipeline so a run's progress is legible from the log timeline
+    /// (`run:&lt;id&gt;`), not only step status. Persisted by the caller's
+    /// SaveChanges. NodeId is the target node when known, else null.
+    /// </summary>
+    private void EmitRunLog(PipelineRun run, Guid? stepId, Guid? nodeId, string level, string message)
+    {
+        var tags = new Dictionary<string, string>
+        {
+            ["run"] = run.Id.ToString(),
+            ["pipeline"] = run.PipelineId.ToString(),
+        };
+        if (stepId is { } s) tags["step"] = s.ToString();
+
+        var now = DateTime.UtcNow;
+        _db.Logs.Add(new Log
+        {
+            Id = Guid.NewGuid(),
+            NodeId = nodeId,
+            Level = level,
+            MessageTemplate = message,
+            Message = message,
+            Tags = JsonSerializer.Serialize(tags),
+            Timestamp = now,
+            CreatedAt = now,
+        });
+    }
 
     private async Task DispatchReadyAsync(
         PipelineRun run,
@@ -163,7 +211,8 @@ public class PipelineRunExecutor
                     nodeId: snapshot.TargetNodeId,
                     strategy: strategy,
                     targetTags: targetTags,
-                    runtimeParamsJson: effectiveParams);
+                    runtimeParamsJson: effectiveParams,
+                    pipeline: new PipelineDispatchContext(run.Id, stepId, run.PipelineId));
             }
             catch (Exception ex)
             {
@@ -180,6 +229,8 @@ public class PipelineRunExecutor
             stepInstance.TaskInstanceId = dispatched.Id;
             stepInstance.Status = PipelineStepInstanceStatus.Dispatched;
             stepInstance.DispatchedAt = DateTime.UtcNow;
+            EmitRunLog(run, stepId, dispatched.NodeId, "Information",
+                $"Step '{snapshot.Name}' dispatched");
             _logger.LogInformation(
                 "Dispatched step {StepName} ({StepId}) of run {RunId} as task {TaskInstanceId}",
                 snapshot.Name, stepId, run.Id, dispatched.Id);

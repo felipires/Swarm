@@ -8,6 +8,8 @@ import type {
   DispatchRequest,
   DispatchStrategy,
   EntityVersionEntry,
+  LogQueryParams,
+  LogRecord,
   Node,
   NodeMetrics,
   Pipeline,
@@ -301,11 +303,27 @@ class ApiClient {
     await this.client.delete(`/pipelines/schedules/${scheduleId}`);
   }
 
-  // Logs
-  logStreamUrl(nodeId: string): string {
-    // Use a relative path so the Vite dev proxy forwards to the correct REST port.
-    // An absolute BASE_URL would bypass the proxy and hit the gRPC-only port.
-    return `/api/logs/stream/${nodeId}`;
+  // Logs — persistent, paginated search (observability v2; replaced SSE).
+  async getLogs(
+    params: LogQueryParams,
+    after?: string,
+  ): Promise<CursorPage<LogRecord>> {
+    // axios serializes array params as repeated keys (tags=a&tags=b) with the
+    // default paramsSerializer when given arrays — matches the controller's
+    // `[FromQuery] string[]`.
+    const response = await this.client.get(`/logs`, {
+      params: {
+        ...(params.tags?.length ? { tags: params.tags } : {}),
+        ...(params.level?.length ? { level: params.level } : {}),
+        ...(params.q ? { q: params.q } : {}),
+        ...(params.nodeId ? { nodeId: params.nodeId } : {}),
+        ...(params.from ? { from: params.from } : {}),
+        ...(params.to ? { to: params.to } : {}),
+        ...(after ? { after } : {}),
+      },
+      paramsSerializer: { indexes: null }, // tags=a&tags=b (no [] suffix)
+    });
+    return response.data;
   }
 }
 

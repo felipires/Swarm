@@ -20,6 +20,7 @@ import { isRunning, RUN_TONE } from "../runStatus";
 import { ScheduleChip } from "../ScheduleChip";
 import { parseParamsWithPlaceholders } from "../../../utils/placeholderJson";
 import { PipelineCanvas } from "./PipelineCanvas";
+import { LogResults } from "../../Observability/LogResults";
 import { StepDetail } from "./StepDetail";
 
 /** Renders a pipeline version snapshot (draft shape) as a compact step list. */
@@ -61,7 +62,7 @@ export function PipelineView() {
   const now = useTicker(5_000);
 
   const [drawerOpen, setDrawerOpen] = useState(true);
-  const [drawerTab, setDrawerTab] = useState<"runs" | "versions">("runs");
+  const [drawerTab, setDrawerTab] = useState<"runs" | "versions" | "logs">("runs");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [runOpen, setRunOpen] = useState(false);
@@ -282,7 +283,7 @@ export function PipelineView() {
             aria-label="Run history and versions"
           >
             <div className="flex items-center gap-1 border-b border-[var(--swarm-border)] px-2 py-1.5">
-              {(["runs", "versions"] as const).map((tab) => (
+              {(["runs", "logs", "versions"] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
@@ -320,6 +321,20 @@ export function PipelineView() {
                   renderSnapshot={(snap) => <PipelineSnapshotView snapshot={snap} />}
                   now={now}
                 />
+              </div>
+            ) : drawerTab === "logs" ? (
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {selectedRunId ? (
+                  <LogResults
+                    params={{ tags: [`run:${selectedRunId}`] }}
+                    refetchMs={selectedRun && isRunning(selectedRun.status) ? 5_000 : 0}
+                    emptyHint="No logs for this run yet."
+                  />
+                ) : (
+                  <p className="p-3 text-sm text-[var(--swarm-muted)]">
+                    Select a run to see its logs.
+                  </p>
+                )}
               </div>
             ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-2">

@@ -287,7 +287,54 @@ public class TaskExecutorService : IAsyncDisposable
         // duration of this handler invocation. Secrets resolved by the handler
         // are scrubbed from any log event emitted before the scope ends.
         using var redactionScope = SecretRedactionContext.Push(pipeline);
-        return await handler.HandleAsync(context);
+
+        // Observability v2: tag every log emitted during this task (executor +
+        // handler) with correlation tags so logs are searchable by task / run /
+        // step / pipeline. The cluster lifts `SwarmTags` straight into the Log
+        // row's jsonb tags column. Env values come only from an explicit
+        // non-secret allow-list — never the encrypted secrets store.
+        using var tagScope = Serilog.Context.LogContext.PushProperty(
+            "SwarmTags", BuildLogTags(message), destructureObjects: true);
+
+        _logger.LogInformation("Task {InstanceId} started ({TaskType})", message.InstanceId, message.TaskType);
+        var result = await handler.HandleAsync(context);
+        if (result.Success)
+            _logger.LogInformation("Task {InstanceId} completed", message.InstanceId);
+        else
+            _logger.LogWarning("Task {InstanceId} failed: {Error}", message.InstanceId, result.ErrorMessage);
+        return result;
+    }
+
+    /// <summary>
+    /// Correlation tags pushed onto every log emitted while a task runs. Keys are
+    /// stable, lower-case facet names matching the log-search query DSL
+    /// (<c>task:</c>, <c>run:</c>, …). Env tags are opt-in via the
+    /// <c>Logging:LogTagEnvKeys</c> allow-list and read from process environment
+    /// only — the encrypted secrets store is never tagged.
+    /// </summary>
+    private Dictionary<string, string> BuildLogTags(TaskMessage message)
+    {
+        var tags = new Dictionary<string, string>
+        {
+            ["task"] = message.InstanceId.ToString(),
+            ["taskDef"] = message.TaskDefinitionId.ToString(),
+            ["taskType"] = message.TaskType,
+        };
+        if (message.PipelineRunId is { } runId) tags["run"] = runId.ToString();
+        if (message.PipelineStepId is { } stepId) tags["step"] = stepId.ToString();
+        if (message.PipelineId is { } pipelineId) tags["pipeline"] = pipelineId.ToString();
+
+        var allow = _configuration.GetSection("Logging:LogTagEnvKeys").Get<string[]>();
+        if (allow is not null)
+        {
+            foreach (var key in allow)
+            {
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                var value = Environment.GetEnvironmentVariable(key);
+                if (!string.IsNullOrEmpty(value)) tags[$"env.{key}"] = value;
+            }
+        }
+        return tags;
     }
 
     /// <summary>

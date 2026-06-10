@@ -47,9 +47,14 @@ public class ClusterDbContext(DbContextOptions<ClusterDbContext> options) : DbCo
             entity.Property(e => e.Level).IsRequired().HasMaxLength(50);
             entity.Property(e => e.MessageTemplate).IsRequired();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()").IsRequired();
+            entity.Property(e => e.Tags).HasColumnType("jsonb");
             entity.HasIndex(e => e.NodeId);
-            entity.HasIndex(e => e.Timestamp);
             entity.HasIndex(e => e.Level);
+            // Keyset pagination for log search orders by (Timestamp desc, Id desc).
+            entity.HasIndex(e => new { e.Timestamp, e.Id });
+            // GIN (jsonb_path_ops) backs the `Tags @> selector` containment used
+            // by tag-faceted log search. Raw-SQL'd in the migration to set the op
+            // class; the trigram indexes on Message/MessageTemplate are too.
         });
 
         modelBuilder.Entity<TaskDefinition>(entity =>
