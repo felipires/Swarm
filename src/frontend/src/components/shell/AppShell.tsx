@@ -49,7 +49,10 @@ export function AppShell() {
           totalNodes={pulse.totalNodes}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          onAlertsClick={() => navigate("/observability")}
+          onAlertsClick={() => {
+            const params = new URLSearchParams({ q: "level:>warn" });
+            navigate(`/observability?${params}`);
+          }}
         />
 
         <main

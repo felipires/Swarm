@@ -108,7 +108,6 @@ public class NodesGrpcService : global::Swarm.Cluster.Services.NodesService.Node
         foreach (var queue in await _nodeService.GetTaggedSubscriptionsAsync(nodeId))
             response.TaggedSubscriptions.Add(queue);
 
-        _logger.LogInformation("{metrics}", JsonSerializer.Serialize(request.Metrics));
         // P5-1: store live metrics best-effort — never fail a heartbeat for this.
         if (request.Metrics is not null)
         {

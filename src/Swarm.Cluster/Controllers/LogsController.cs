@@ -28,7 +28,7 @@ public class LogsController : ControllerBase
     public async Task<ActionResult> Search(
         [FromQuery] Guid? nodeId,
         [FromQuery(Name = "tags")] string[]? tags,
-[FromQuery(Name = "level")] string[]? level,
+        [FromQuery(Name = "level")] string[]? level,
         [FromQuery] string? q,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
@@ -36,8 +36,71 @@ public class LogsController : ControllerBase
         [FromQuery] int? limit,
         CancellationToken cancellationToken)
     {
-        IQueryable<Log> query = _db.Logs;
+        var (query, badRequest) = ApplyFilters(_db.Logs, nodeId, tags, level, q, from, to);
+        if (badRequest is not null) return badRequest;
 
+        if (!string.IsNullOrWhiteSpace(after))
+        {
+            if (!Cursor.TryDecode(after, out var key))
+                return BadRequest(new ApiError("INVALID_CURSOR", "The 'after' cursor is malformed"));
+            query = query.Where(l =>
+                l.Timestamp < key.CreatedAt
+                || (l.Timestamp == key.CreatedAt && l.Id.CompareTo(key.Id) < 0));
+        }
+
+        var take = limit is > 0 and <= PageRequest.MaxPageSize
+            ? limit.Value
+            : PageRequest.DefaultPageSize;
+
+        var rows = await query
+            .OrderByDescending(l => l.Timestamp)
+            .ThenByDescending(l => l.Id)
+            .Take(take + 1)
+            .ToListAsync(cancellationToken);
+
+        var hasMore = rows.Count > take;
+        var page = hasMore ? rows.Take(take).ToList() : rows;
+        var nextCursor = hasMore && page.Count > 0
+            ? Cursor.Encode(new Cursor.Key(page[^1].Timestamp, page[^1].Id))
+            : null;
+
+        return Ok(new CursorPagedResult<LogResponse>(
+            page.Select(LogResponse.From).ToList(), nextCursor, hasMore));
+    }
+
+    /// <summary>
+    /// Returns the count of log rows matching the given filters. Intended for
+    /// dashboard widgets (e.g. alert badge) that need a number without fetching
+    /// full log objects. Accepts the same filter params as <c>GET /api/logs</c>
+    /// except <c>after</c> and <c>limit</c>.
+    /// </summary>
+    [HttpGet("count")]
+    public async Task<ActionResult> Count(
+        [FromQuery] Guid? nodeId,
+        [FromQuery(Name = "tags")] string[]? tags,
+        [FromQuery(Name = "level")] string[]? level,
+        [FromQuery] string? q,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken cancellationToken)
+    {
+        var (query, badRequest) = ApplyFilters(_db.Logs, nodeId, tags, level, q, from, to);
+        if (badRequest is not null) return badRequest;
+
+        var count = await query.CountAsync(cancellationToken);
+        return Ok(new { count });
+    }
+
+    // Shared filter logic for Search and Count.
+    private (IQueryable<Log> Query, BadRequestObjectResult? Error) ApplyFilters(
+        IQueryable<Log> query,
+        Guid? nodeId,
+        string[]? tags,
+        string[]? level,
+        string? q,
+        DateTime? from,
+        DateTime? to)
+    {
         if (nodeId is { } nid)
             query = query.Where(l => l.NodeId == nid);
 
@@ -55,8 +118,6 @@ public class LogsController : ControllerBase
             query = query.Where(l => l.Timestamp <= tUtc);
         }
 
-        // Tag facets → a single jsonb containment predicate `Tags @> @json`,
-        // served by the GIN(jsonb_path_ops) index. Supports arbitrary keys.
         if (tags is { Length: > 0 })
         {
             var selector = new Dictionary<string, string>();
@@ -65,7 +126,7 @@ public class LogsController : ControllerBase
                 if (string.IsNullOrWhiteSpace(pair)) continue;
                 var sep = pair.IndexOf(':');
                 if (sep <= 0 || sep == pair.Length - 1)
-                    return BadRequest(new ApiError("INVALID_TAG", $"Tag '{pair}' must be in key:value form"));
+                    return (query, BadRequest(new ApiError("INVALID_TAG", $"Tag '{pair}' must be in key:value form")));
                 selector[pair[..sep]] = pair[(sep + 1)..];
             }
             if (selector.Count > 0)
@@ -75,7 +136,6 @@ public class LogsController : ControllerBase
             }
         }
 
-        // Free text → substring over message and template (pg_trgm GIN ILIKE).
         if (!string.IsNullOrWhiteSpace(q))
         {
             var like = $"%{EscapeLike(q.Trim())}%";
@@ -84,35 +144,7 @@ public class LogsController : ControllerBase
                 || EF.Functions.ILike(l.MessageTemplate, like));
         }
 
-        if (!string.IsNullOrWhiteSpace(after))
-        {
-            if (!Cursor.TryDecode(after, out var key))
-                return BadRequest(new ApiError("INVALID_CURSOR", "The 'after' cursor is malformed"));
-            // Keyset boundary under (Timestamp DESC, Id DESC). Expanded form for
-            // reliable provider translation.
-            query = query.Where(l =>
-                l.Timestamp < key.CreatedAt
-                || (l.Timestamp == key.CreatedAt && l.Id.CompareTo(key.Id) < 0));
-        }
-
-        var take = limit is > 0 and <= PageRequest.MaxPageSize
-            ? limit.Value
-            : PageRequest.DefaultPageSize;
-
-        var rows = await query
-            .OrderByDescending(l => l.Timestamp)
-            .ThenByDescending(l => l.Id)
-            .Take(take + 1) // one extra to detect HasMore
-            .ToListAsync(cancellationToken);
-
-        var hasMore = rows.Count > take;
-        var page = hasMore ? rows.Take(take).ToList() : rows;
-        var nextCursor = hasMore && page.Count > 0
-            ? Cursor.Encode(new Cursor.Key(page[^1].Timestamp, page[^1].Id))
-            : null;
-
-        return Ok(new CursorPagedResult<LogResponse>(
-            page.Select(LogResponse.From).ToList(), nextCursor, hasMore));
+        return (query, null);
     }
 
     /// <summary>Escape LIKE/ILIKE wildcards so user text is matched literally.</summary>

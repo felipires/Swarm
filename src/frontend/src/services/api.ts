@@ -304,6 +304,21 @@ class ApiClient {
   }
 
   // Logs — persistent, paginated search (observability v2; replaced SSE).
+  async getLogCount(params: Omit<LogQueryParams, "limit">): Promise<number> {
+    const response = await this.client.get(`/logs/count`, {
+      params: {
+        ...(params.tags?.length ? { tags: params.tags } : {}),
+        ...(params.level?.length ? { level: params.level } : {}),
+        ...(params.q ? { q: params.q } : {}),
+        ...(params.nodeId ? { nodeId: params.nodeId } : {}),
+        ...(params.from ? { from: params.from } : {}),
+        ...(params.to ? { to: params.to } : {}),
+      },
+      paramsSerializer: { indexes: null },
+    });
+    return response.data.count as number;
+  }
+
   async getLogs(
     params: LogQueryParams,
     after?: string,

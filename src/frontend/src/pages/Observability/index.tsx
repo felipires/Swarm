@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { LogResults } from "./LogResults";
 import { addFacet, parseLogQuery } from "./logQuery";
 
@@ -17,11 +18,25 @@ const REFRESH = [
 ] as const;
 
 export const ObservabilityPage = () => {
-  // The raw query-bar text; parsed into structured params on submit.
-  const [input, setInput] = useState("");
-  const [submitted, setSubmitted] = useState("");
-  const [rangeMin, setRangeMin] = useState<number>(60);
-  const [refreshMs, setRefreshMs] = useState<number>(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const submitted = searchParams.get("q") ?? "";
+  const rangeMin = Number(searchParams.get("range") ?? "60");
+  const refreshMs = Number(searchParams.get("refresh") ?? "0");
+
+  // Input tracks the live query bar text; initialised from URL on mount.
+  // Also syncs when the URL changes externally (e.g. alert badge navigation).
+  const [input, setInput] = useState(submitted);
+  useEffect(() => { setInput(submitted); }, [submitted]);
+
+  const setParam = (key: string, value: string, defaultValue: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === defaultValue) next.delete(key);
+      else next.set(key, value);
+      return next;
+    }, { replace: true });
+  };
 
   const params = useMemo(() => {
     const parsed = parseLogQuery(submitted);
@@ -34,7 +49,7 @@ export const ObservabilityPage = () => {
   const onAddFacet = (key: string, value: string) => {
     const next = addFacet(input, key, value);
     setInput(next);
-    setSubmitted(next);
+    setParam("q", next, "");
   };
 
   return (
@@ -54,7 +69,7 @@ export const ObservabilityPage = () => {
         className="mb-3 flex flex-wrap items-center gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          setSubmitted(input);
+          setParam("q", input, "");
         }}
       >
         <input
@@ -68,13 +83,13 @@ export const ObservabilityPage = () => {
         <Select
           label="Range"
           value={String(rangeMin)}
-          onChange={(v) => setRangeMin(Number(v))}
+          onChange={(v) => setParam("range", v, "60")}
           options={RANGES.map((r) => ({ label: r.label, value: String(r.minutes) }))}
         />
         <Select
           label="Auto-refresh"
           value={String(refreshMs)}
-          onChange={(v) => setRefreshMs(Number(v))}
+          onChange={(v) => setParam("refresh", v, "0")}
           options={REFRESH.map((r) => ({ label: r.label, value: String(r.ms) }))}
         />
         <button

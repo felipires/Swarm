@@ -6,6 +6,8 @@ import type { Node } from "../store/store";
 export type ClusterConnection = "checking" | "connected" | "disconnected";
 
 const STALE_THRESHOLD_MS = 60_000;
+const ALERT_LEVELS = ["Warning", "Error", "Critical"];
+const ALERT_WINDOW_MS = 60 * 60 * 1000; // last hour
 
 export interface ClusterPulse {
   connection: ClusterConnection;
@@ -43,18 +45,35 @@ export function useClusterPulse(): ClusterPulse {
     refetchInterval: 30_000,
   });
 
+  // Round to the nearest minute so the query key is stable across renders
+  // within the same minute — prevents a new fetch on every render cycle.
+  const alertFrom = new Date(
+    Math.floor((Date.now() - ALERT_WINDOW_MS) / 60_000) * 60_000,
+  ).toISOString();
+  const alertParams = { level: ALERT_LEVELS, from: alertFrom };
+  const alertQuery = useQuery({
+    queryKey: queryKeys.logCount(alertParams),
+    queryFn: () => apiClient.getLogCount(alertParams),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
   const nodes = query.data ?? [];
   const lastUpdated = query.dataUpdatedAt || null;
   const now = lastUpdated ?? Date.now();
 
   return {
-    connection: connectionFrom(query.isError, query.isFetching, query.data !== undefined),
+    connection: connectionFrom(
+      query.isError,
+      query.isFetching,
+      query.data !== undefined,
+    ),
     nodes,
     onlineCount: nodes.filter((n) => n.status === "Online").length,
     offlineCount: nodes.filter((n) => n.status === "Offline").length,
     staleCount: nodes.filter((n) => isStale(n, now)).length,
     totalNodes: nodes.length,
-    alertCount: 0,
+    alertCount: alertQuery.data ?? 0,
     lastUpdated,
     refresh: () => void query.refetch(),
   };

@@ -17,4 +17,5 @@ export const queryKeys = {
   // Log search — keyed by the structured params so each distinct query/filter
   // set is cached independently.
   logs: (params: unknown) => ["logs", params] as const,
+  logCount: (params: unknown) => ["logs", "count", params] as const,
 };
