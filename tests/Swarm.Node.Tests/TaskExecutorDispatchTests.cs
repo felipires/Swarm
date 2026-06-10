@@ -90,8 +90,49 @@ public class TaskExecutorDispatchTests
         await executor.DispatchAsync(message, CancellationToken.None);
 
         handler.LastContext.Should().NotBeNull();
-        handler.LastContext!.StaticConfig.GetProperty("url").GetString().Should().Be("https://example.com");
+        handler.LastContext!.Config.GetProperty("url").GetString().Should().Be("https://example.com");
         handler.LastContext.RuntimeParams.GetProperty("tenantId").GetString().Should().Be("acme");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ValuePositionPlaceholders_ResolveToTypedJson()
+    {
+        // A template with unquoted value-position placeholders is not valid JSON
+        // as written; it must still reach the handler, which interpolates
+        // RawConfig into a fully-typed, valid resolved config.
+        var handler = new RecordingHandler("a@1", new TaskResult(true));
+        var executor = BuildExecutor(handler);
+
+        var message = new TaskMessage
+        {
+            InstanceId = Guid.NewGuid(),
+            TaskType = "a@1",
+            ConfigJson = """
+                {
+                  "url": "{param:url}",
+                  "headers": {param:headers:type=json},
+                  "timeoutSeconds": {param:timeout:type=int},
+                  "successStatusCodes": {param:codes:type=json}
+                }
+                """,
+            RuntimeParamsJson = """
+                {"url":"https://x.test","headers":{"X-A":"1"},"timeout":30,"codes":[200,201]}
+                """,
+        };
+
+        var result = await executor.DispatchAsync(message, CancellationToken.None);
+        result.Success.Should().BeTrue();
+
+        // The core resolves the config and hands the handler a finished,
+        // correctly-typed Config — no per-handler interpolation needed.
+        var parsed = handler.LastContext!.Config;
+        parsed.GetProperty("url").GetString().Should().Be("https://x.test");
+        parsed.GetProperty("headers").ValueKind.Should().Be(JsonValueKind.Object);
+        parsed.GetProperty("headers").GetProperty("X-A").GetString().Should().Be("1");
+        parsed.GetProperty("timeoutSeconds").ValueKind.Should().Be(JsonValueKind.Number);
+        parsed.GetProperty("timeoutSeconds").GetInt32().Should().Be(30);
+        parsed.GetProperty("successStatusCodes").EnumerateArray()
+            .Select(e => e.GetInt32()).Should().Equal(200, 201);
     }
 
     private static TaskMessage MessageWith(string taskType, string? configJson = null) => new()
@@ -115,9 +156,11 @@ public class TaskExecutorDispatchTests
         var db = new AppDbConnection(dataOptions, NullLogger<AppDbConnection>.Instance);
         var envSecrets = new EnvSecretsStore(db, config, NullLogger<EnvSecretsStore>.Instance);
 
+        var plaintextConfig = new PlaintextConfigStore(db);
         return new TaskExecutorService(
             db,
             envSecrets,
+            plaintextConfig,
             config,
             NullLogger<TaskExecutorService>.Instance,
             NullLoggerFactory.Instance,

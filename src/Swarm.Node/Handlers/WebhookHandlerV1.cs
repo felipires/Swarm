@@ -12,13 +12,13 @@ namespace Swarm.Node.Handlers;
 /// verify by recomputing HMAC-SHA256 over the request body with the shared
 /// secret.
 /// </summary>
-public sealed class WebhookHandlerV1 : ITaskHandler
+public sealed class WebhookHandlerV1 : TaskHandler<WebhookHandlerV1.WebhookHandlerConfig>
 {
     private static readonly HttpClient HttpClient = new();
 
-    public string TaskType => "webhook@1";
+    public override string TaskType => "webhook@1";
 
-    public HandlerSchema Schema { get; } = new()
+    public override HandlerSchema Schema { get; } = new()
     {
         JsonSchema = """
             {
@@ -35,31 +35,10 @@ public sealed class WebhookHandlerV1 : ITaskHandler
             """
     };
 
-    public async Task<TaskResult> HandleAsync(TaskContext context)
+    protected override async Task<TaskResult> HandleAsync(WebhookHandlerConfig config, TaskContext context)
     {
-        string resolved;
-        try
-        {
-            resolved = await context.Resolver.InterpolateAsync(
-                context.StaticConfig.GetRawText(), context.CancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_FAILED: {ex.Message}");
-        }
-
-        WebhookHandlerConfig? config;
-        try
-        {
-            config = JsonSerializer.Deserialize<WebhookHandlerConfig>(resolved, JsonOpts);
-        }
-        catch (JsonException ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_INVALID: {ex.Message}");
-        }
-
-        if (config is null || string.IsNullOrEmpty(config.Url) || string.IsNullOrEmpty(config.Secret))
-            return new TaskResult(false, ErrorMessage: "CONFIG_RESOLUTION_INVALID: url and secret are required");
+        if (string.IsNullOrEmpty(config.Url) || string.IsNullOrEmpty(config.Secret))
+            return new TaskResult(false, ErrorMessage: "CONFIG_INVALID: url and secret are required");
 
         var payload = new
         {
@@ -111,12 +90,7 @@ public sealed class WebhookHandlerV1 : ITaskHandler
         return "sha256=" + Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
-    private sealed class WebhookHandlerConfig
+    public sealed class WebhookHandlerConfig
     {
         public string? Url { get; set; }
         public string? Secret { get; set; }

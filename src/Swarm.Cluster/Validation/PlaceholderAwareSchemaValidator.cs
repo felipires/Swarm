@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Json.Schema;
@@ -25,7 +24,7 @@ namespace Swarm.Cluster.Validation;
 /// </summary>
 public static class PlaceholderAwareSchemaValidator
 {
-    public const string Sentinel = "__SWARM_PLACEHOLDER__";
+    public const string Sentinel = PlaceholderSubstitution.Sentinel;
 
     public sealed record ValidationFailure(string Path, string Message);
 
@@ -68,7 +67,46 @@ public static class PlaceholderAwareSchemaValidator
 
         var failures = new List<ValidationFailure>();
         Collect(result, failures);
+
+        // Drop failures at paths whose value is the placeholder sentinel: those
+        // fields are supplied at runtime (notably value-position {…:type=json},
+        // whose resolved type — object/array/scalar — the Cluster cannot know).
+        // Their real shape is checked by the handler at execution time.
+        failures = failures
+            .Where(f => !ValueAtPathIsSentinel(configNode, f.Path))
+            .ToList();
+
         return failures;
+    }
+
+    /// <summary>
+    /// Resolves a JSON Pointer (as produced by the schema evaluator's instance
+    /// location, e.g. <c>/headers</c>) against the substituted config and
+    /// returns true when the value there is exactly the placeholder sentinel.
+    /// </summary>
+    private static bool ValueAtPathIsSentinel(JsonNode? root, string pointer)
+    {
+        if (root is null || string.IsNullOrEmpty(pointer) || pointer == "$") return false;
+
+        var node = root;
+        foreach (var rawSeg in pointer.Split('/'))
+        {
+            if (rawSeg.Length == 0) continue; // leading empty segment before first '/'
+            var seg = rawSeg.Replace("~1", "/").Replace("~0", "~");
+            switch (node)
+            {
+                case JsonObject obj when obj.TryGetPropertyValue(seg, out var child):
+                    node = child;
+                    break;
+                case JsonArray arr when int.TryParse(seg, out var idx) && idx >= 0 && idx < arr.Count:
+                    node = arr[idx];
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        return node is JsonValue v && v.TryGetValue<string>(out var s) && s == Sentinel;
     }
 
     private static void Collect(EvaluationResults node, List<ValidationFailure> failures)
@@ -87,72 +125,11 @@ public static class PlaceholderAwareSchemaValidator
     }
 
     /// <summary>
-    /// Walks <paramref name="source"/> tracking JSON string state and replaces
-    /// every <c>{src:key:mods}</c> with a syntactically valid surrogate so the
-    /// result parses as JSON. Visible for testing.
+    /// Rewrites value/string-position placeholders into surrogate literals so
+    /// the template parses as JSON. Delegates to the shared
+    /// <see cref="PlaceholderSubstitution"/> in the SDK (the Node config-staging
+    /// path uses the exact same logic). Visible for testing.
     /// </summary>
     internal static string SubstitutePlaceholders(string source)
-    {
-        var placeholders = PlaceholderParser.Extract(source);
-        if (placeholders.Count == 0) return source;
-
-        // For each placeholder figure out if it's inside a string literal by
-        // scanning the source up to its Start and counting unescaped quotes.
-        var sb = new StringBuilder(source.Length);
-        var cursor = 0;
-        foreach (var p in placeholders)
-        {
-            sb.Append(source, cursor, p.Start - cursor);
-            sb.Append(InsideString(source, p.Start) ? StringSurrogate(p) : ValueSurrogate(p));
-            cursor = p.Start + p.Length;
-        }
-        sb.Append(source, cursor, source.Length - cursor);
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Returns true if <paramref name="position"/> is inside an unterminated
-    /// JSON string literal. Counts unescaped quotes from start of input.
-    /// </summary>
-    private static bool InsideString(string source, int position)
-    {
-        bool inString = false;
-        for (int i = 0; i < position; i++)
-        {
-            var c = source[i];
-            if (c == '\\' && i + 1 < position)
-            {
-                i++;             // skip the escaped char
-                continue;
-            }
-            if (c == '"') inString = !inString;
-        }
-        return inString;
-    }
-
-    private static string StringSurrogate(Placeholder p)
-        => GetDefault(p) ?? Sentinel;
-
-    private static string ValueSurrogate(Placeholder p)
-    {
-        var defaultMod = GetDefault(p);
-        var type = p.Modifiers
-            .FirstOrDefault(m => m.StartsWith("type=", StringComparison.Ordinal))
-            ?.Substring("type=".Length);
-
-        return type switch
-        {
-            "int" => defaultMod ?? "0",
-            "float" => defaultMod ?? "0.0",
-            "bool" => defaultMod ?? "false",
-            "json" => defaultMod ?? "null",
-            _ => defaultMod is null ? $"\"{Sentinel}\"" : $"\"{defaultMod}\"",
-        };
-    }
-
-    private static string? GetDefault(Placeholder p)
-    {
-        var mod = p.Modifiers.FirstOrDefault(m => m.StartsWith("default=", StringComparison.Ordinal));
-        return mod?.Substring("default=".Length);
-    }
+        => PlaceholderSubstitution.ToParseableJson(source);
 }

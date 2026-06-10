@@ -125,6 +125,55 @@ public class ValueResolverPipelineTests
         result.Should().Be("https://api.example.com/items/42");
     }
 
+    [Fact]
+    public async Task InterpolateAsync_ValuePositionInt_ProducesUnquotedNumber()
+    {
+        // Unquoted placeholder at a JSON value position: type=int must emit a
+        // bare number so the resolved document is valid JSON with an integer.
+        var pipeline = new ValueResolverPipeline(new[] { Static("param", "timeout", "30") });
+
+        var result = await pipeline.InterpolateAsync(
+            """{"timeoutSeconds":{param:timeout:type=int}}""", default);
+
+        result.Should().Be("""{"timeoutSeconds":30}""");
+        var parsed = System.Text.Json.JsonDocument.Parse(result).RootElement;
+        parsed.GetProperty("timeoutSeconds").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Number);
+        parsed.GetProperty("timeoutSeconds").GetInt32().Should().Be(30);
+    }
+
+    [Fact]
+    public async Task InterpolateAsync_ValuePositionJsonObject_ProducesObject()
+    {
+        // type=json injects the resolved value verbatim at value position, so a
+        // param holding a JSON object lands as a real object, not a string.
+        var pipeline = new ValueResolverPipeline(new[]
+        {
+            Static("param", "headers", """{"Authorization":"Bearer x","Content-Type":"application/json"}"""),
+        });
+
+        var result = await pipeline.InterpolateAsync(
+            """{"headers":{param:headers:type=json}}""", default);
+
+        var parsed = System.Text.Json.JsonDocument.Parse(result).RootElement;
+        var headers = parsed.GetProperty("headers");
+        headers.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Object);
+        headers.GetProperty("Authorization").GetString().Should().Be("Bearer x");
+    }
+
+    [Fact]
+    public async Task InterpolateAsync_ValuePositionJsonArray_ProducesArray()
+    {
+        var pipeline = new ValueResolverPipeline(new[] { Static("param", "codes", "[200,201]") });
+
+        var result = await pipeline.InterpolateAsync(
+            """{"successStatusCodes":{param:codes:type=json}}""", default);
+
+        var parsed = System.Text.Json.JsonDocument.Parse(result).RootElement;
+        var codes = parsed.GetProperty("successStatusCodes");
+        codes.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Array);
+        codes.EnumerateArray().Select(e => e.GetInt32()).Should().Equal(200, 201);
+    }
+
     private static IValueResolver Static(string source, string key, string value)
         => new StubResolver(source, k => k == key ? new ResolvedValue(value) : null);
 

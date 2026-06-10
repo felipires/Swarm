@@ -30,11 +30,11 @@ namespace Swarm.Examples.DataPipeline;
 ///   step-3 params:
 ///     { "query": "SELECT {param:n1} + {param:n2};" }
 /// </summary>
-public sealed class CountRowsHandler : ITaskHandler
+public sealed class CountRowsHandler : TaskHandler<CountRowsHandler.CountRowsConfig>
 {
-    public string TaskType => "count-rows@1";
+    public override string TaskType => "count-rows@1";
 
-    public HandlerSchema Schema { get; } = new()
+    public override HandlerSchema Schema { get; } = new()
     {
         JsonSchema = """
             {
@@ -48,30 +48,9 @@ public sealed class CountRowsHandler : ITaskHandler
         RequiredParams = ["filePath"],
     };
 
-    public async Task<TaskResult> HandleAsync(TaskContext context)
+    protected override async Task<TaskResult> HandleAsync(CountRowsConfig config, TaskContext context)
     {
-        string resolved;
-        try
-        {
-            resolved = await context.Resolver.InterpolateAsync(
-                context.StaticConfig.GetRawText(), context.CancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_FAILED: {ex.Message}");
-        }
-
-        CountRowsConfig? config;
-        try
-        {
-            config = JsonSerializer.Deserialize<CountRowsConfig>(resolved, JsonOpts);
-        }
-        catch (JsonException ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_INVALID: {ex.Message}");
-        }
-
-        if (config is null || string.IsNullOrWhiteSpace(config.FilePath))
+        if (string.IsNullOrWhiteSpace(config.FilePath))
             return new TaskResult(false, ErrorMessage: "CONFIG_INVALID: filePath is required");
 
         if (!File.Exists(config.FilePath))
@@ -106,9 +85,7 @@ public sealed class CountRowsHandler : ITaskHandler
         }
     }
 
-    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
-
-    private sealed class CountRowsConfig
+    public sealed class CountRowsConfig
     {
         public string? FilePath { get; set; }
     }

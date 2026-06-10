@@ -15,11 +15,11 @@ namespace Swarm.Node.Handlers;
 /// query, so the dispatch layer normalizes nothing — write the query in
 /// the dialect the provider expects.
 /// </summary>
-public sealed class SqlHandlerV1 : ITaskHandler
+public sealed class SqlHandlerV1 : TaskHandler<SqlHandlerV1.SqlHandlerConfig>
 {
-    public string TaskType => "sql@1";
+    public override string TaskType => "sql@1";
 
-    public HandlerSchema Schema { get; } = new()
+    public override HandlerSchema Schema { get; } = new()
     {
         JsonSchema = """
             {
@@ -36,31 +36,10 @@ public sealed class SqlHandlerV1 : ITaskHandler
             """,
     };
 
-    public async Task<TaskResult> HandleAsync(TaskContext context)
+    protected override async Task<TaskResult> HandleAsync(SqlHandlerConfig config, TaskContext context)
     {
-        string resolved;
-        try
-        {
-            resolved = await context.Resolver.InterpolateAsync(
-                context.StaticConfig.GetRawText(), context.CancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_FAILED: {ex.Message}");
-        }
-
-        SqlHandlerConfig? config;
-        try
-        {
-            config = JsonSerializer.Deserialize<SqlHandlerConfig>(resolved, JsonOpts);
-        }
-        catch (JsonException ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_INVALID: {ex.Message}");
-        }
-
-        if (config is null || string.IsNullOrEmpty(config.ConnectionString) || string.IsNullOrEmpty(config.Query))
-            return new TaskResult(false, ErrorMessage: "CONFIG_RESOLUTION_INVALID: connectionString and query are required");
+        if (string.IsNullOrEmpty(config.ConnectionString) || string.IsNullOrEmpty(config.Query))
+            return new TaskResult(false, ErrorMessage: "CONFIG_INVALID: connectionString and query are required");
 
         DbConnection conn;
         try
@@ -128,12 +107,7 @@ public sealed class SqlHandlerV1 : ITaskHandler
             var p => throw new InvalidOperationException($"Unsupported SQL provider '{p}'"),
         };
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
-    private sealed class SqlHandlerConfig
+    public sealed class SqlHandlerConfig
     {
         /// <summary>postgres | mssql | mysql; defaults to postgres.</summary>
         public string? Provider { get; set; }

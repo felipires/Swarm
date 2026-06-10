@@ -19,11 +19,11 @@ namespace Swarm.Examples.FileProcessor;
 /// Result JSON:
 /// { "rowCount": 1500, "columnCount": 8, "fileSizeBytes": 204800 }
 /// </summary>
-public sealed class CsvSummaryHandler : ITaskHandler
+public sealed class CsvSummaryHandler : TaskHandler<CsvSummaryHandler.CsvSummaryConfig>
 {
-    public string TaskType => "csv-summary@1";
+    public override string TaskType => "csv-summary@1";
 
-    public HandlerSchema Schema { get; } = new()
+    public override HandlerSchema Schema { get; } = new()
     {
         JsonSchema = """
             {
@@ -38,30 +38,9 @@ public sealed class CsvSummaryHandler : ITaskHandler
         RequiredParams = ["filePath"],
     };
 
-    public async Task<TaskResult> HandleAsync(TaskContext context)
+    protected override async Task<TaskResult> HandleAsync(CsvSummaryConfig config, TaskContext context)
     {
-        string resolved;
-        try
-        {
-            resolved = await context.Resolver.InterpolateAsync(
-                context.StaticConfig.GetRawText(), context.CancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_FAILED: {ex.Message}");
-        }
-
-        CsvSummaryConfig? config;
-        try
-        {
-            config = JsonSerializer.Deserialize<CsvSummaryConfig>(resolved, JsonOpts);
-        }
-        catch (JsonException ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_INVALID: {ex.Message}");
-        }
-
-        if (config is null || string.IsNullOrWhiteSpace(config.FilePath))
+        if (string.IsNullOrWhiteSpace(config.FilePath))
             return new TaskResult(false, ErrorMessage: "CONFIG_INVALID: filePath is required");
 
         if (!File.Exists(config.FilePath))
@@ -115,9 +94,7 @@ public sealed class CsvSummaryHandler : ITaskHandler
         }
     }
 
-    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
-
-    private sealed class CsvSummaryConfig
+    public sealed class CsvSummaryConfig
     {
         public string? FilePath { get; set; }
         public bool HasHeader { get; set; } = true;

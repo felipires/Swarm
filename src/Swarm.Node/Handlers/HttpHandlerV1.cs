@@ -13,13 +13,13 @@ namespace Swarm.Node.Handlers;
 /// over the multi-hour lifetime of a Node, but if it becomes a problem the
 /// container can be cycled.
 /// </summary>
-public sealed class HttpHandlerV1 : ITaskHandler
+public sealed class HttpHandlerV1 : TaskHandler<HttpHandlerV1.HttpHandlerConfig>
 {
     private static readonly HttpClient HttpClient = new();
 
-    public string TaskType => "http@1";
+    public override string TaskType => "http@1";
 
-    public HandlerSchema Schema { get; } = new()
+    public override HandlerSchema Schema { get; } = new()
     {
         JsonSchema = """
             {
@@ -37,31 +37,10 @@ public sealed class HttpHandlerV1 : ITaskHandler
             """
     };
 
-    public async Task<TaskResult> HandleAsync(TaskContext context)
+    protected override async Task<TaskResult> HandleAsync(HttpHandlerConfig config, TaskContext context)
     {
-        string resolved;
-        try
-        {
-            resolved = await context.Resolver.InterpolateAsync(
-                context.StaticConfig.GetRawText(), context.CancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_FAILED: {ex.Message}");
-        }
-
-        HttpHandlerConfig? config;
-        try
-        {
-            config = JsonSerializer.Deserialize<HttpHandlerConfig>(resolved, JsonOpts);
-        }
-        catch (JsonException ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_INVALID: {ex.Message}");
-        }
-
-        if (config is null || string.IsNullOrEmpty(config.Url))
-            return new TaskResult(false, ErrorMessage: "CONFIG_RESOLUTION_INVALID: url is required");
+        if (string.IsNullOrEmpty(config.Url))
+            return new TaskResult(false, ErrorMessage: "CONFIG_INVALID: url is required");
 
         using var request = new HttpRequestMessage(new HttpMethod(config.Method ?? "GET"), config.Url);
         if (config.Body is not null)
@@ -109,12 +88,7 @@ public sealed class HttpHandlerV1 : ITaskHandler
         }
     }
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
-    private sealed class HttpHandlerConfig
+    public sealed class HttpHandlerConfig
     {
         public string? Method { get; set; }
         public string? Url { get; set; }

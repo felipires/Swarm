@@ -34,11 +34,11 @@ namespace Swarm.Examples.DataPipeline;
 ///   rowCount → n1  from step-1
 ///   rowCount → n2  from step-2
 /// </summary>
-public sealed class AggregateReportHandler : ITaskHandler
+public sealed class AggregateReportHandler : TaskHandler<AggregateReportHandler.ReportConfig>
 {
-    public string TaskType => "aggregate-report@1";
+    public override string TaskType => "aggregate-report@1";
 
-    public HandlerSchema Schema { get; } = new()
+    public override HandlerSchema Schema { get; } = new()
     {
         JsonSchema = """
             {
@@ -56,30 +56,9 @@ public sealed class AggregateReportHandler : ITaskHandler
         RequiredParams = ["outputPath", "n1", "n2"],
     };
 
-    public async Task<TaskResult> HandleAsync(TaskContext context)
+    protected override async Task<TaskResult> HandleAsync(ReportConfig config, TaskContext context)
     {
-        string resolved;
-        try
-        {
-            resolved = await context.Resolver.InterpolateAsync(
-                context.StaticConfig.GetRawText(), context.CancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_FAILED: {ex.Message}");
-        }
-
-        ReportConfig? config;
-        try
-        {
-            config = JsonSerializer.Deserialize<ReportConfig>(resolved, JsonOpts);
-        }
-        catch (JsonException ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_INVALID: {ex.Message}");
-        }
-
-        if (config is null || string.IsNullOrWhiteSpace(config.OutputPath))
+        if (string.IsNullOrWhiteSpace(config.OutputPath))
             return new TaskResult(false, ErrorMessage: "CONFIG_INVALID: outputPath is required");
 
         if (!long.TryParse(config.CountA, out var countA) ||
@@ -121,9 +100,7 @@ public sealed class AggregateReportHandler : ITaskHandler
         }
     }
 
-    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
-
-    private sealed class ReportConfig
+    public sealed class ReportConfig
     {
         public string? OutputPath { get; set; }
         public string? LabelA { get; set; }

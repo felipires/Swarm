@@ -23,13 +23,13 @@ namespace Swarm.Examples.SlackNotifier;
 /// The SLACK_WEBHOOK_URL env key must be present in the Node's env store
 /// (delivered via POST /api/nodes/:id/env or set as SWARM_TASKENV_SLACK_WEBHOOK_URL).
 /// </summary>
-public sealed class SlackNotifyHandler : ITaskHandler
+public sealed class SlackNotifyHandler : TaskHandler<SlackNotifyHandler.SlackConfig>
 {
     private static readonly HttpClient HttpClient = new();
 
-    public string TaskType => "slack-notify@1";
+    public override string TaskType => "slack-notify@1";
 
-    public HandlerSchema Schema { get; } = new()
+    public override HandlerSchema Schema { get; } = new()
     {
         JsonSchema = """
             {
@@ -48,30 +48,9 @@ public sealed class SlackNotifyHandler : ITaskHandler
         RequiredParams = ["message"],
     };
 
-    public async Task<TaskResult> HandleAsync(TaskContext context)
+    protected override async Task<TaskResult> HandleAsync(SlackConfig config, TaskContext context)
     {
-        string resolved;
-        try
-        {
-            resolved = await context.Resolver.InterpolateAsync(
-                context.StaticConfig.GetRawText(), context.CancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_FAILED: {ex.Message}");
-        }
-
-        SlackConfig? config;
-        try
-        {
-            config = JsonSerializer.Deserialize<SlackConfig>(resolved, JsonOpts);
-        }
-        catch (JsonException ex)
-        {
-            return new TaskResult(false, ErrorMessage: $"CONFIG_INVALID: {ex.Message}");
-        }
-
-        if (config is null || string.IsNullOrWhiteSpace(config.WebhookUrl))
+        if (string.IsNullOrWhiteSpace(config.WebhookUrl))
             return new TaskResult(false, ErrorMessage: "CONFIG_INVALID: webhookUrl is required");
         if (string.IsNullOrWhiteSpace(config.Text))
             return new TaskResult(false, ErrorMessage: "CONFIG_INVALID: text is required");
@@ -109,9 +88,7 @@ public sealed class SlackNotifyHandler : ITaskHandler
         }
     }
 
-    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
-
-    private sealed class SlackConfig
+    public sealed class SlackConfig
     {
         public string? WebhookUrl { get; set; }
         public string? Channel { get; set; }

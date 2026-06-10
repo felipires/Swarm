@@ -10,9 +10,10 @@ The `Swarm.Node.Sdk` package (NuGet ID: `Swarm.Node.Sdk`, C# namespace: `Swarm.S
 
 | Component | Namespace | Description |
 |---|---|---|
-| `ITaskHandler` | `Swarm.Sdk.Abstractions` | Interface all handlers implement |
+| `ITaskHandler` | `Swarm.Sdk.Abstractions` | Core interface all handlers implement (raw resolved `JsonElement` config) |
+| `TaskHandler<TConfig>` | `Swarm.Sdk.Abstractions` | Recommended base: deserializes the resolved config into `TConfig` and eager-returns `CONFIG_INVALID` on a bad shape |
 | `HandlerSchema` | `Swarm.Sdk.Abstractions` | JSON Schema + required env/param declarations |
-| `TaskContext` | `Swarm.Sdk.Abstractions` | Execution context: resolved config, logger, cancellation |
+| `TaskContext` | `Swarm.Sdk.Abstractions` | Execution context: resolved config, `GetConfig<T>()`, logger, cancellation |
 | `TaskResult` | `Swarm.Sdk.Abstractions` | Handler return value |
 | `TaskMessage` | `Swarm.Sdk.Wire` | Wire message shape (shared with Cluster) |
 | `IValueResolver` / `ValueResolverPipeline` | `Swarm.Sdk.ValueResolution` | Placeholder resolution pipeline |

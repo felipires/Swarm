@@ -18,6 +18,7 @@ public class TaskExecutorService : IAsyncDisposable
 {
     private readonly AppDbConnection _dbConnection;
     private readonly EnvSecretsStore _envSecrets;
+    private readonly PlaintextConfigStore _plaintextConfig;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TaskExecutorService> _logger;
     private readonly ILoggerFactory _loggerFactory;
@@ -39,6 +40,7 @@ public class TaskExecutorService : IAsyncDisposable
     public TaskExecutorService(
         AppDbConnection dbConnection,
         EnvSecretsStore envSecrets,
+        PlaintextConfigStore plaintextConfig,
         IConfiguration configuration,
         ILogger<TaskExecutorService> logger,
         ILoggerFactory loggerFactory,
@@ -46,6 +48,7 @@ public class TaskExecutorService : IAsyncDisposable
     {
         _dbConnection = dbConnection;
         _envSecrets = envSecrets;
+        _plaintextConfig = plaintextConfig;
         _configuration = configuration;
         _logger = logger;
         _loggerFactory = loggerFactory;
@@ -246,7 +249,14 @@ public class TaskExecutorService : IAsyncDisposable
         JsonElement staticConfig;
         try
         {
-            staticConfig = JsonSerializer.Deserialize<JsonElement>(message.ConfigJson);
+            // The template may carry value-position placeholders (e.g. an
+            // unquoted {param:n:type=int}) that aren't valid JSON until the
+            // real values are substituted. Parse a placeholder-substituted
+            // surrogate so StaticConfig + the config: resolver always have a
+            // parseable document; the handler resolves real values by
+            // interpolating message.ConfigJson (RawConfig) directly.
+            var parseable = PlaceholderSubstitution.ToParseableJson(message.ConfigJson);
+            staticConfig = JsonSerializer.Deserialize<JsonElement>(parseable);
         }
         catch (JsonException ex)
         {
@@ -270,22 +280,21 @@ public class TaskExecutorService : IAsyncDisposable
             }
         }
 
-        // P1-5a: pipeline pre-seeded with the three default sources. Handler
-        // code calls ctx.Resolver.InterpolateAsync(rawJson) on the config text
-        // it cares about, then parses the resolved JSON.
+        // P1-5a: pipeline pre-seeded with the three default sources. The core
+        // resolves the config here (see below) so handlers receive a finished,
+        // strongly-typeable config and never repeat the interpolate-then-parse
+        // boilerplate. ConfigResolver is backed by the placeholder-substituted
+        // parse so {config:} cross-references see the template's static values.
         var pipeline = new ValueResolverPipeline(new IValueResolver[]
         {
-            new EnvStoreResolver(_envSecrets),
+            new EnvStoreResolver(_envSecrets, _plaintextConfig),
             new ParamResolver(runtimeParams),
             new ConfigResolver(staticConfig),
         });
 
-        var handlerLogger = _loggerFactory.CreateLogger(handler.GetType());
-        var context = new TaskContext(message, staticConfig, runtimeParams, pipeline, handlerLogger, cancellationToken);
-
         // P4-2a: expose the pipeline to the Serilog redaction enricher for the
-        // duration of this handler invocation. Secrets resolved by the handler
-        // are scrubbed from any log event emitted before the scope ends.
+        // duration of this task. Established BEFORE resolution so any secret
+        // values substituted into the config are scrubbed from log output.
         using var redactionScope = SecretRedactionContext.Push(pipeline);
 
         // Observability v2: tag every log emitted during this task (executor +
@@ -296,12 +305,43 @@ public class TaskExecutorService : IAsyncDisposable
         using var tagScope = Serilog.Context.LogContext.PushProperty(
             "SwarmTags", BuildLogTags(message), destructureObjects: true);
 
+        // Resolve the config once, in the core. Value-position placeholders
+        // (e.g. unquoted {param:n:type=int} / {param:h:type=json}) become valid
+        // typed JSON here. Resolution failures fail the task uniformly so every
+        // handler doesn't need its own try/catch.
+        JsonElement resolvedConfig;
+        try
+        {
+            var resolvedText = await pipeline.InterpolateAsync(message.ConfigJson, cancellationToken);
+            resolvedConfig = JsonSerializer.Deserialize<JsonElement>(resolvedText);
+        }
+        catch (ValueResolutionException ex)
+        {
+            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_FAILED: {ex.Message}");
+        }
+        catch (JsonException ex)
+        {
+            return new TaskResult(false, ErrorMessage: $"CONFIG_RESOLUTION_INVALID: {ex.Message}");
+        }
+
+        var handlerLogger = _loggerFactory.CreateLogger(handler.GetType());
+        var context = new TaskContext(message, resolvedConfig, runtimeParams, pipeline, handlerLogger, cancellationToken);
+        TaskResult? result = null;
+
         _logger.LogInformation("Task {InstanceId} started ({TaskType})", message.InstanceId, message.TaskType);
-        var result = await handler.HandleAsync(context);
-        if (result.Success)
-            _logger.LogInformation("Task {InstanceId} completed", message.InstanceId);
-        else
-            _logger.LogWarning("Task {InstanceId} failed: {Error}", message.InstanceId, result.ErrorMessage);
+
+        try
+        {
+            result = await handler.HandleAsync(context);
+            if (result.Success)
+                _logger.LogInformation("Task {InstanceId} completed", message.InstanceId);
+            else
+                _logger.LogWarning("Task {InstanceId} failed: {Error}", message.InstanceId, result.ErrorMessage);
+        } catch (Exception ex)
+        {
+            result = new(false, null, ex.Message);
+        }
+
         return result;
     }
 

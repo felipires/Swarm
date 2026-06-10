@@ -112,4 +112,42 @@ public class PlaceholderAwareSchemaValidatorTests
 
         failures.Should().BeEmpty();
     }
+
+    private const string HttpSchemaWithHeaders = """
+        {
+          "type": "object",
+          "required": ["method", "url"],
+          "properties": {
+            "method": { "type": "string" },
+            "url": { "type": "string" },
+            "headers": { "type": "object" }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Validate_ValuePositionJsonPlaceholder_ExemptFromTypeCheck()
+    {
+        // headers is "object", but its value is a value-position {…:type=json}
+        // placeholder. The resolved type is unknowable at the Cluster, so the
+        // schema check must not reject it — the handler validates at runtime.
+        var config = """{"method": "GET", "url": "https://x", "headers": {param:headers:type=json}}""";
+
+        var failures = PlaceholderAwareSchemaValidator.Validate(config, HttpSchemaWithHeaders);
+
+        failures.Should().BeEmpty(
+            "value-position type=json placeholders are runtime-typed and exempt from Cluster schema type-checking");
+    }
+
+    [Fact]
+    public void Validate_StaticWrongTypeForObjectField_StillFails()
+    {
+        // A concrete (non-placeholder) wrong value must still be caught — the
+        // exemption is only for placeholder-driven fields.
+        var config = """{"method": "GET", "url": "https://x", "headers": "not-an-object"}""";
+
+        var failures = PlaceholderAwareSchemaValidator.Validate(config, HttpSchemaWithHeaders);
+
+        failures.Should().NotBeEmpty();
+    }
 }
