@@ -21,7 +21,6 @@ export function AppShell() {
   const route = routeFromPath(location.pathname);
 
   const [collapsed, setCollapsed] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
   const pulse = useClusterPulse();
 
   useEffect(() => {
@@ -47,8 +46,6 @@ export function AppShell() {
           connection={pulse.connection}
           onlineCount={pulse.onlineCount}
           totalNodes={pulse.totalNodes}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
           onAlertsClick={() => {
             const params = new URLSearchParams({ q: "level:>warn" });
             navigate(`/observability?${params}`);

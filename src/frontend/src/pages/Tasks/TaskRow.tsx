@@ -13,6 +13,45 @@ import { CreateTaskForm } from "./CreateTaskForm";
 import { DispatchControl } from "./DispatchControl";
 import { InstanceHistory } from "./InstanceHistory";
 
+function CollapsibleSection({
+  title,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const id = useId();
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={id}
+        className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-[var(--swarm-muted)] transition-colors hover:text-[var(--swarm-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)]"
+        style={{ transitionDuration: "var(--swarm-duration)" }}
+      >
+        <IconChevron
+          direction="right"
+          width={12}
+          height={12}
+          style={{
+            transform: open ? "rotate(90deg)" : "none",
+            transitionDuration: "var(--swarm-duration)",
+            transitionTimingFunction: "var(--swarm-ease-out)",
+          }}
+          aria-hidden
+        />
+        {title}
+      </button>
+      {open && <div id={id} className="mt-2">{children}</div>}
+    </section>
+  );
+}
+
 /** Renders a task version snapshot (create-request shape) as config JSON. */
 function TaskSnapshotView({ snapshot }: { snapshot: unknown }) {
   const s = snapshot as {
@@ -177,10 +216,7 @@ export function TaskRow({ task, now }: TaskRowProps) {
             )}
           </section>
 
-          <section>
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--swarm-muted)]">
-              Version history
-            </h3>
+          <CollapsibleSection title="Version history">
             <VersionHistory
               kind="task"
               entityId={task.id}
@@ -192,14 +228,11 @@ export function TaskRow({ task, now }: TaskRowProps) {
               renderSnapshot={(snap) => <TaskSnapshotView snapshot={snap} />}
               now={now}
             />
-          </section>
+          </CollapsibleSection>
 
-          <section>
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--swarm-muted)]">
-              Recent instances
-            </h3>
+          <CollapsibleSection title="Recent instances">
             <InstanceHistory taskId={task.id} />
-          </section>
+          </CollapsibleSection>
         </div>
       )}
     </div>

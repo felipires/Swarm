@@ -1,13 +1,12 @@
 import type { ClusterConnection } from "../../hooks/useClusterPulse";
-import { IconAlert, IconCluster, IconNodes, IconSearch } from "./icons";
+import { GlobalSearch } from "./GlobalSearch";
+import { IconAlert, IconCluster, IconNodes } from "./icons";
 
 interface StatusStripProps {
   alertCount: number;
   connection: ClusterConnection;
   onlineCount: number;
   totalNodes: number;
-  searchQuery: string;
-  onSearchChange: (value: string) => void;
   onAlertsClick: () => void;
 }
 
@@ -39,8 +38,6 @@ export function StatusStrip({
   connection,
   onlineCount,
   totalNodes,
-  searchQuery,
-  onSearchChange,
   onAlertsClick,
 }: StatusStripProps) {
   const hasAlerts = alertCount > 0;
@@ -67,24 +64,7 @@ export function StatusStrip({
         <span>{hasAlerts ? `${alertCount} alert${alertCount === 1 ? "" : "s"}` : "No alerts"}</span>
       </button>
 
-      <div className="relative min-w-[12rem] flex-1 max-w-md">
-        <label htmlFor="global-search" className="sr-only">
-          Search nodes, runs, and pipelines
-        </label>
-        <IconSearch
-          width={15}
-          height={15}
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--swarm-muted)]"
-        />
-        <input
-          id="global-search"
-          type="search"
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search nodes, runs, pipelines…"
-          className="w-full rounded-md border border-[var(--swarm-border)] bg-[var(--swarm-surface)] py-1.5 pl-9 pr-3 text-sm text-[var(--swarm-ink)] placeholder:text-[var(--swarm-placeholder)] focus:border-[var(--swarm-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--swarm-primary)]/25"
-        />
-      </div>
+      <GlobalSearch />
 
       <div className="ml-auto flex flex-wrap items-center gap-2">
         <ConnectionIndicator connection={connection} />

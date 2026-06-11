@@ -55,11 +55,16 @@ function Timeline({ instance, now }: { instance: TaskInstance; now: number }) {
                 {stage.label}
               </span>
               {reached ? (
-                <span className="text-xs text-[var(--swarm-muted)]" title={absoluteTime(stage.at!)}>
+                <span
+                  className="text-xs text-[var(--swarm-muted)]"
+                  title={absoluteTime(stage.at!)}
+                >
                   {absoluteTime(stage.at!)} · {relativeTime(stage.at!, now)}
                 </span>
               ) : (
-                <span className="text-xs text-[var(--swarm-placeholder)]">pending</span>
+                <span className="text-xs text-[var(--swarm-placeholder)]">
+                  pending
+                </span>
               )}
             </span>
           </li>
@@ -69,7 +74,13 @@ function Timeline({ instance, now }: { instance: TaskInstance; now: number }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-xs font-medium uppercase tracking-wide text-[var(--swarm-muted)]">
@@ -80,7 +91,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function InstanceDetail({ instance, nodeName, now }: InstanceDetailProps) {
+export function InstanceDetail({
+  instance,
+  nodeName,
+  now,
+}: InstanceDetailProps) {
   const start = instance.dispatchedAt ?? instance.createdAt;
 
   return (
@@ -93,7 +108,10 @@ export function InstanceDetail({ instance, nodeName, now }: InstanceDetailProps)
             </span>
           </Field>
           <Field label="Node">
-            <span className="font-mono text-xs" title={instance.nodeId ?? undefined}>
+            <span
+              className="font-mono text-xs"
+              title={instance.nodeId ?? undefined}
+            >
               {nodeName}
             </span>
           </Field>
@@ -108,6 +126,10 @@ export function InstanceDetail({ instance, nodeName, now }: InstanceDetailProps)
           <Timeline instance={instance} now={now} />
         </div>
       </div>
+
+      {instance.runtimeParamsJson && (
+        <JsonViewer value={instance.runtimeParamsJson} label="Runtime Params" />
+      )}
 
       {instance.errorMessage && (
         <div className="rounded-md border border-[var(--swarm-danger)]/30 bg-[var(--swarm-danger-subtle)] px-3 py-2">

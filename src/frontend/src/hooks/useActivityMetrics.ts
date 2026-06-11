@@ -33,9 +33,12 @@ export function useActivityMetrics(): ActivityMetrics {
 
   const tasks = tasksQuery.data ?? [];
 
+  // Use a separate cache key from InstanceHistory's useInfiniteQuery so the
+  // two don't share the same entry (useQuery vs useInfiniteQuery have
+  // incompatible data shapes under the same key).
   const instanceQueries = useQueries({
     queries: tasks.map((t) => ({
-      queryKey: queryKeys.taskInstances(t.id),
+      queryKey: [...queryKeys.taskInstances(t.id), "metrics"] as const,
       queryFn: () => apiClient.getInstances(t.id),
       refetchInterval: 30_000,
     })),
