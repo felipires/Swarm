@@ -165,17 +165,24 @@ public class PipelinesController : ControllerBase
     }
 
     [HttpGet("{id}/runs")]
-    public async Task<IActionResult> GetRunsById(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetRunsById(
+        Guid id,
+        [FromQuery] CursorRequest cursor,
+        CancellationToken cancellationToken)
     {
-        try
+        Cursor.Key? after = null;
+        if (!string.IsNullOrEmpty(cursor.After))
         {
-            var runs = await _service.GetRunsByPipelineId(id, cancellationToken);
-            return Ok(new PagedResult<PipelineRunResponse>(runs.Select(PipelineRunResponse.From).ToList(), runs.Count, 0, runs.Count));
+            if (!Cursor.TryDecode(cursor.After, out var key))
+                return BadRequest(new ApiError("INVALID_CURSOR", "The 'after' cursor is malformed"));
+            after = key;
         }
-        catch (InvalidOperationException)
-        {
-            return NotFound(new ApiError("PIPELINE_NOT_FOUND", $"Pipeline {id} not found"));
-        }
+
+        var result = await _service.GetRunsByPipelineId(id, after, cursor.NormalizedLimit, cancellationToken);
+        return Ok(new CursorPagedResult<PipelineRunResponse>(
+            result.Items.Select(PipelineRunResponse.From).ToList(),
+            result.NextCursor,
+            result.HasMore));
     }
 
     [HttpPost("{id}/run")]

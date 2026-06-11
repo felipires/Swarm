@@ -175,9 +175,11 @@ class ApiClient {
   }
 
   // Instances
-  async getInstances(taskId: string): Promise<TaskInstance[]> {
-    const response = await this.client.get(`/tasks/${taskId}/instances`);
-    return response.data.items;
+  async getInstances(taskId: string, after?: string): Promise<CursorPage<TaskInstance>> {
+    const response = await this.client.get(`/tasks/${taskId}/instances`, {
+      params: { cursor: true, ...(after ? { after } : {}) },
+    });
+    return response.data;
   }
 
   async getInstance(instanceId: string): Promise<TaskInstance> {

@@ -58,7 +58,7 @@ export function useActivityMetrics(): ActivityMetrics {
   for (const q of instanceQueries) {
     if (!q.isSuccess || !q.data) continue;
     anyOk = true;
-    for (const inst of q.data) {
+    for (const inst of q.data.items) {
       if (isActive(inst)) active++;
       if (failedToday(inst, since)) failed++;
     }

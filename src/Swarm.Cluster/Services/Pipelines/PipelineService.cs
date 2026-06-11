@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Swarm.Cluster.Data;
 using Swarm.Cluster.Models;
+using Swarm.Cluster.Models.Dto;
 
 namespace Swarm.Cluster.Services.Pipelines;
 
@@ -420,10 +421,31 @@ public class PipelineService
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(cancellationToken);
 
-    public async Task<List<PipelineRun>> GetRunsByPipelineId(Guid pipelineId, CancellationToken cancellationToken)
+    public async Task<CursorPagedResult<PipelineRun>> GetRunsByPipelineId(
+        Guid pipelineId,
+        Cursor.Key? after,
+        int limit,
+        CancellationToken cancellationToken)
     {
-        return await _db.PipelineRuns.Where(x => x.PipelineId == pipelineId)
-            .OrderByDescending(x => x.StartedAt)
+        var query = _db.PipelineRuns.Where(x => x.PipelineId == pipelineId);
+
+        if (after is { } key)
+            query = query.Where(r =>
+                r.StartedAt < key.CreatedAt
+                || (r.StartedAt == key.CreatedAt && r.Id.CompareTo(key.Id) < 0));
+
+        var rows = await query
+            .OrderByDescending(r => r.StartedAt)
+            .ThenByDescending(r => r.Id)
+            .Take(limit + 1)
             .ToListAsync(cancellationToken);
+
+        var hasMore = rows.Count > limit;
+        var page = hasMore ? rows.Take(limit).ToList() : rows;
+        var nextCursor = hasMore && page.Count > 0
+            ? Cursor.Encode(new Cursor.Key(page[^1].StartedAt, page[^1].Id))
+            : null;
+
+        return new CursorPagedResult<PipelineRun>(page, nextCursor, hasMore);
     }
 }

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { IconChevron } from "../../components/shell/icons";
 import { StatusPill } from "../../components/ui/StatusPill";
@@ -14,7 +14,6 @@ interface InstanceHistoryProps {
   taskId: string;
 }
 
-const MAX_VISIBLE = 10;
 
 interface InstanceRowProps {
   instance: TaskInstance;
@@ -96,9 +95,11 @@ function InstanceRow({ instance, nodeName, now }: InstanceRowProps) {
 
 export function InstanceHistory({ taskId }: InstanceHistoryProps) {
   const now = useTicker(5_000);
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: queryKeys.taskInstances(taskId),
-    queryFn: () => apiClient.getInstances(taskId),
+    queryFn: ({ pageParam }) => apiClient.getInstances(taskId, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => (last.hasMore ? last.nextCursor : undefined),
     refetchInterval: 15_000,
   });
 
@@ -109,8 +110,6 @@ export function InstanceHistory({ taskId }: InstanceHistoryProps) {
   });
   const nodeNames = new Map((nodesQuery.data ?? []).map((n) => [n.id, n.name]));
   const nameFor = (id: string | null | undefined) => {
-    // Shared-queue dispatch (AnyOnlineNode / TaggedNodes) leaves nodeId null
-    // until a node claims the instance.
     if (!id) return "unclaimed";
     return nodeNames.get(id) ?? `${id.slice(0, 8)}…`;
   };
@@ -140,9 +139,7 @@ export function InstanceHistory({ taskId }: InstanceHistoryProps) {
     );
   }
 
-  const instances = [...(query.data ?? [])].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+  const instances = query.data?.pages.flatMap((p) => p.items) ?? [];
 
   if (instances.length === 0) {
     return (
@@ -150,13 +147,10 @@ export function InstanceHistory({ taskId }: InstanceHistoryProps) {
     );
   }
 
-  const visible = instances.slice(0, MAX_VISIBLE);
-  const hidden = instances.length - visible.length;
-
   return (
     <div>
       <ul className="divide-y divide-[var(--swarm-border)]">
-        {visible.map((inst, i) => (
+        {instances.map((inst, i) => (
           <InstanceRow
             key={inst.id ?? `instance-${i}`}
             instance={inst}
@@ -165,11 +159,16 @@ export function InstanceHistory({ taskId }: InstanceHistoryProps) {
           />
         ))}
       </ul>
-      {hidden > 0 && (
-        <p className="mt-2 text-xs text-[var(--swarm-muted)]">
-          Showing the {MAX_VISIBLE} most recent of {instances.length}{" "}
-          dispatches.
-        </p>
+      {query.hasNextPage && (
+        <button
+          type="button"
+          onClick={() => query.fetchNextPage()}
+          disabled={query.isFetchingNextPage}
+          className="mt-2 rounded-md px-2 py-1 text-xs font-medium text-[var(--swarm-primary)] transition-colors hover:bg-[var(--swarm-primary-subtle)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--swarm-focus)] disabled:opacity-50"
+          style={{ transitionDuration: "var(--swarm-duration)" }}
+        >
+          {query.isFetchingNextPage ? "Loading…" : "Show older dispatches"}
+        </button>
       )}
     </div>
   );
