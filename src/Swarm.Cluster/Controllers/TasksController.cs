@@ -240,28 +240,8 @@ public class TasksController : ControllerBase
     /// <c>after</c> token is supplied; otherwise the offset path is unchanged.
     /// </summary>
     [HttpGet("{id}/instances")]
-    public async Task<ActionResult> GetInstances(
-        Guid id,
-        [FromQuery] PageRequest page,
-        [FromQuery] CursorRequest cursor,
-        [FromQuery] bool useCursor = false)
-    {
-        if (useCursor || !string.IsNullOrEmpty(cursor.After))
-            return await GetInstancesByCursorAsync(id, cursor);
-
-        var baseQuery = _db.TaskInstances
-            .Where(i => i.TaskDefinitionId == id)
-            .OrderByDescending(i => i.CreatedAt);
-        var total = await baseQuery.CountAsync();
-        var instances = await baseQuery
-            .Skip(page.Skip)
-            .Take(page.NormalizedPageSize)
-            .ToListAsync();
-
-        return Ok(new PagedResult<TaskInstanceResponse>(
-            instances.Select(TaskInstanceResponse.From).ToList(),
-            total, page.NormalizedPage, page.NormalizedPageSize));
-    }
+    public async Task<ActionResult> GetInstances(Guid id, [FromQuery] CursorRequest cursor)
+        => await GetInstancesByCursorAsync(id, cursor);
 
     private async Task<ActionResult> GetInstancesByCursorAsync(Guid id, CursorRequest cursor)
     {

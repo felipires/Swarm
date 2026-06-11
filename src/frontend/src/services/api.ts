@@ -46,7 +46,9 @@ class ApiClient {
    *  settings without mutating the live client. Returns true on { status: "ok" }. */
   async checkHealth(settings: ApiSettings): Promise<boolean> {
     const healthUrl = settings.baseUrl.replace(/\/api\/?$/, "") + "/health";
-    const headers = settings.apiKey ? { "X-API-Key": settings.apiKey } : undefined;
+    const headers = settings.apiKey
+      ? { "X-API-Key": settings.apiKey }
+      : undefined;
     const response = await axios.get(healthUrl, { headers, timeout: 5000 });
     return response.data?.status === "ok";
   }
@@ -84,7 +86,12 @@ class ApiClient {
   }
 
   /** Queue an env value for delivery to the node on its next heartbeat. */
-  async setNodeEnv(id: string, key: string, value: string, isSecret = true): Promise<void> {
+  async setNodeEnv(
+    id: string,
+    key: string,
+    value: string,
+    isSecret = true,
+  ): Promise<void> {
     await this.client.post(`/nodes/${id}/env`, { key, value, isSecret });
   }
 
@@ -145,13 +152,21 @@ class ApiClient {
     return response.data;
   }
 
-  async getTaskVersion(id: string, version: number): Promise<EntityVersionEntry> {
+  async getTaskVersion(
+    id: string,
+    version: number,
+  ): Promise<EntityVersionEntry> {
     const response = await this.client.get(`/tasks/${id}/versions/${version}`);
     return response.data;
   }
 
-  async restoreTaskVersion(id: string, version: number): Promise<TaskDefinition> {
-    const response = await this.client.post(`/tasks/${id}/versions/${version}/restore`);
+  async restoreTaskVersion(
+    id: string,
+    version: number,
+  ): Promise<TaskDefinition> {
+    const response = await this.client.post(
+      `/tasks/${id}/versions/${version}/restore`,
+    );
     return response.data;
   }
 
@@ -164,7 +179,10 @@ class ApiClient {
   }
 
   // Dispatch
-  async dispatchTask(taskId: string, req: DispatchRequest): Promise<TaskInstance> {
+  async dispatchTask(
+    taskId: string,
+    req: DispatchRequest,
+  ): Promise<TaskInstance> {
     const response = await this.client.post(`/tasks/${taskId}/dispatch`, req);
     return response.data;
   }
@@ -175,9 +193,12 @@ class ApiClient {
   }
 
   // Instances
-  async getInstances(taskId: string, after?: string): Promise<CursorPage<TaskInstance>> {
+  async getInstances(
+    taskId: string,
+    after?: string,
+  ): Promise<CursorPage<TaskInstance>> {
     const response = await this.client.get(`/tasks/${taskId}/instances`, {
-      params: { cursor: true, ...(after ? { after } : {}) },
+      params: after ? { after } : {},
     });
     return response.data;
   }
@@ -224,13 +245,20 @@ class ApiClient {
     return response.data;
   }
 
-  async getPipelineVersion(id: string, version: number): Promise<EntityVersionEntry> {
-    const response = await this.client.get(`/pipelines/${id}/versions/${version}`);
+  async getPipelineVersion(
+    id: string,
+    version: number,
+  ): Promise<EntityVersionEntry> {
+    const response = await this.client.get(
+      `/pipelines/${id}/versions/${version}`,
+    );
     return response.data;
   }
 
   async restorePipelineVersion(id: string, version: number): Promise<Pipeline> {
-    const response = await this.client.post(`/pipelines/${id}/versions/${version}/restore`);
+    const response = await this.client.post(
+      `/pipelines/${id}/versions/${version}/restore`,
+    );
     return response.data;
   }
 
@@ -243,7 +271,9 @@ class ApiClient {
   }
 
   async retryFailedRun(runId: string): Promise<PipelineRun> {
-    const response = await this.client.post(`/pipelines/runs/${runId}/retry-failed`);
+    const response = await this.client.post(
+      `/pipelines/runs/${runId}/retry-failed`,
+    );
     return response.data;
   }
 
@@ -252,7 +282,7 @@ class ApiClient {
     after?: string,
   ): Promise<CursorPage<PipelineRun>> {
     const response = await this.client.get(`/pipelines/${pipelineId}/runs`, {
-      params: after ? { after } : {},
+      params: { limit: 10, ...(after ? { after } : {}) },
     });
     return response.data;
   }

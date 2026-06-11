@@ -64,7 +64,7 @@ public class StartupService(
             }
 
             _logger.LogInformation("Node registered successfully. Configuring RabbitMQ logging sink.");
-            _dynamicRabbitMqSink.Configure(configuration);
+            _dynamicRabbitMqSink.Configure(_configuration);
             _logger.LogInformation("RabbitMQ logging sink configured and active");
 
             _logger.LogDebug("Node initialization completed successfully");

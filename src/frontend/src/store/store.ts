@@ -166,7 +166,11 @@ export interface PipelineStepInstance {
   resultJson?: string | null;
 }
 
-export type PipelineRunStatus = "Running" | "Completed" | "Failed" | "Cancelled";
+export type PipelineRunStatus =
+  | "Running"
+  | "Completed"
+  | "Failed"
+  | "Cancelled";
 
 export interface PipelineRun {
   id: string;
@@ -228,7 +232,12 @@ export interface CapabilityCatalogEntry {
   nodeCount: number;
 }
 
-export type LogLevel = "Debug" | "Information" | "Warning" | "Error" | "Critical";
+export type LogLevel =
+  | "Debug"
+  | "Information"
+  | "Warning"
+  | "Error"
+  | "Critical";
 
 /** A persisted log row from the search endpoint (`GET /api/logs`). `level` is a
  *  free-form string from the worker's logger, so consumers must tolerate unknown
