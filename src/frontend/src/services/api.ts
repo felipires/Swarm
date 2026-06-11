@@ -198,7 +198,7 @@ class ApiClient {
     after?: string,
   ): Promise<CursorPage<TaskInstance>> {
     const response = await this.client.get(`/tasks/${taskId}/instances`, {
-      params: after ? { after } : {},
+      params: { limit: 10, ...(after ? { after } : {}) },
     });
     return response.data;
   }
