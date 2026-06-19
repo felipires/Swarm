@@ -25,14 +25,34 @@ public class StartupService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        try
+        const int maxAttempts = 5;
+        int attempt = 1;
+        bool initialized = false;
+
+        while (!initialized && attempt <= maxAttempts)
         {
-            _logger.LogDebug("Startup service initializing node. Locking background services until initialization is complete.");
-            await Task.WhenAll(InitializeNodeAsync(), SetupShutdownHandlerAsync());
+            try
+            {
+                _logger.LogDebug("Startup service initializing node. Locking background services until initialization is complete.");
+                await InitializeNodeAsync();
+                initialized = true;
+            } catch (Exception ex)
+            {
+                _logger.LogError(ex, "Node initialization failed at attempt {attempt}", attempt);
+                if (attempt < maxAttempts)
+                    await Task.Delay(TimeSpan.FromSeconds(5 * attempt), cancellationToken);
+                attempt++;
+            }
+        }
+
+        if (initialized)
+        {
+            await SetupShutdownHandlerAsync();
             _gate.Release();
-        } catch (Exception ex)
+        }
+        else
         {
-            _logger.LogCritical(ex, "Startup service failed to initialize node. Shutting down application.");
+            _logger.LogCritical("Startup service failed to initialize node. Shutting down application.");
             _appLifetime.StopApplication();
         }
     }
