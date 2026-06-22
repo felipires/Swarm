@@ -164,7 +164,7 @@ public class TaskExecutorDispatchTests
             config,
             NullLogger<TaskExecutorService>.Instance,
             NullLoggerFactory.Instance,
-            handlers);
+            new HandlerRegistry(handlers));
     }
 
     private sealed class RecordingHandler(string taskType, TaskResult result) : ITaskHandler

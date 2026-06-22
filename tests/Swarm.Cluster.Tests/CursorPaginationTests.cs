@@ -78,7 +78,7 @@ public class CursorPaginationTests
         do
         {
             var result = await controller.GetInstances(defId,
-                new PageRequest(), new CursorRequest { After = after, Limit = 2 }, useCursor: true);
+                new CursorRequest { After = after, Limit = 2 });
             var paged = Unwrap(result);
             seen.AddRange(paged.Items.Select(x => x.Id));
             after = paged.NextCursor;
@@ -99,7 +99,7 @@ public class CursorPaginationTests
         var controller = BuildController(db);
 
         var first = Unwrap(await controller.GetInstances(defId,
-            new PageRequest(), new CursorRequest { Limit = 10 }, useCursor: true));
+            new CursorRequest { Limit = 10 }));
 
         first.HasMore.Should().BeFalse();
         first.NextCursor.Should().BeNull();
@@ -116,8 +116,7 @@ public class CursorPaginationTests
         await db.SaveChangesAsync();
         var controller = BuildController(db);
 
-        var p1 = Unwrap(await controller.GetInstances(defId,
-            new PageRequest(), new CursorRequest { Limit = 2 }, useCursor: true));
+        var p1 = Unwrap(await controller.GetInstances(defId, new CursorRequest { Limit = 2 }));
 
         // A newer row arrives between page 1 and page 2. Keyset paging anchors on
         // the cursor, so the second page is unaffected by the new head row.
@@ -125,7 +124,7 @@ public class CursorPaginationTests
         await db.SaveChangesAsync();
 
         var p2 = Unwrap(await controller.GetInstances(defId,
-            new PageRequest(), new CursorRequest { After = p1.NextCursor, Limit = 2 }, useCursor: true));
+            new CursorRequest { After = p1.NextCursor, Limit = 2 }));
 
         p1.Items.Select(x => x.Id).Should().NotIntersectWith(p2.Items.Select(x => x.Id));
         p2.Items.Should().HaveCount(2, "the two oldest rows, untouched by the new head insert");
@@ -138,8 +137,7 @@ public class CursorPaginationTests
         var defId = await SeedDefinitionAsync(db);
         var controller = BuildController(db);
 
-        var result = await controller.GetInstances(defId,
-            new PageRequest(), new CursorRequest { After = "garbage" }, useCursor: true);
+        var result = await controller.GetInstances(defId, new CursorRequest { After = "garbage" });
 
         result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<ApiError>()
@@ -147,7 +145,7 @@ public class CursorPaginationTests
     }
 
     [Fact]
-    public async Task GetInstances_DefaultMode_StillOffset()
+    public async Task GetInstances_NoCursor_ReturnsCursorPage()
     {
         using var db = BuildDb();
         var defId = await SeedDefinitionAsync(db);
@@ -155,10 +153,10 @@ public class CursorPaginationTests
         await db.SaveChangesAsync();
         var controller = BuildController(db);
 
-        var result = await controller.GetInstances(defId, new PageRequest(), new CursorRequest());
+        var result = await controller.GetInstances(defId, new CursorRequest());
 
         var ok = result.Should().BeOfType<OkObjectResult>().Subject;
-        ok.Value.Should().BeOfType<PagedResult<TaskInstanceResponse>>();
+        ok.Value.Should().BeOfType<CursorPagedResult<TaskInstanceResponse>>();
     }
 
     // ---- helpers ------------------------------------------------------------

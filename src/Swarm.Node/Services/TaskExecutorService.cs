@@ -44,7 +44,7 @@ public class TaskExecutorService : IAsyncDisposable
         IConfiguration configuration,
         ILogger<TaskExecutorService> logger,
         ILoggerFactory loggerFactory,
-        IEnumerable<ITaskHandler> handlers)
+        HandlerRegistry registry)
     {
         _dbConnection = dbConnection;
         _envSecrets = envSecrets;
@@ -52,7 +52,7 @@ public class TaskExecutorService : IAsyncDisposable
         _configuration = configuration;
         _logger = logger;
         _loggerFactory = loggerFactory;
-        _registry = new HandlerRegistry(handlers);
+        _registry = registry;
 
         foreach (var taskType in _registry.RegisteredTaskTypes)
             _logger.LogInformation("Registered handler {TaskType}", taskType);

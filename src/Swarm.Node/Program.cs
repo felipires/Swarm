@@ -75,43 +75,13 @@ var builder = Host.CreateDefaultBuilder(args)
         services.AddSingleton<NodeMetricsCollector>();
         services.AddSingleton<RegistrationService>();
         services.AddSingleton<HeartBeatService>();
+        services.AddSingleton<HandlerRegistry>();
         services.AddSingleton<TaskExecutorService>();
-
-        // Optional plugin scan: load ITaskHandler implementations from a directory.
-        // TODO P4-3: trust model — Assembly.LoadFrom on an unsanitized path is unsafe
-        // once Nodes run in shared environments. Revisit when the trust model lands.
-        var pluginPath = configuration["Swarm:PluginsPath"];
-        Log.Information("PluginsPath: {pluginPath} - {Exists} - {pwd}", pluginPath, Directory.Exists(pluginPath), Directory.GetCurrentDirectory());
-        if (!string.IsNullOrWhiteSpace(pluginPath) && Directory.Exists(pluginPath))
-        {
-            var bootstrap = Log.Logger;
-            var loaded = 0;
-            foreach (var dll in Directory.GetFiles(pluginPath, "*.dll"))
-            {
-                try
-                {
-                    var asm = Assembly.LoadFrom(dll);
-                    foreach (var type in asm.GetTypes()
-                        .Where(t => typeof(ITaskHandler).IsAssignableFrom(t)
-                                    && !t.IsAbstract
-                                    && t.GetConstructor(Type.EmptyTypes) is not null))
-                    {
-                        services.AddSingleton(typeof(ITaskHandler), type);
-                        loaded++;
-                        bootstrap.Information("Loaded plugin handler {Type} from {Dll}", type.FullName, dll);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    bootstrap.Error(ex, "Failed to load plugin assembly {Dll}", dll);
-                }
-            }
-            bootstrap.Information("Plugin scan complete: {Count} handler(s) loaded from {Path}", loaded, pluginPath);
-        }
 
         // Add hosted services
         services.AddHostedService<StartupService>();
         services.AddHostedService<NodeWorker>();
+        services.AddHostedService<PluginWatcherService>();
     });
 
 var host = builder.Build();

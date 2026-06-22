@@ -8,27 +8,31 @@ namespace Swarm.Node.Services;
 /// Construction throws if two handlers claim the same task type — that is a
 /// system-integrity bug we want to surface at startup, not at first message.
 /// </summary>
-internal sealed class HandlerRegistry
+public sealed class HandlerRegistry
 {
-    private readonly Dictionary<string, ITaskHandler> _byTaskType;
+    // ponytail: ConcurrentDictionary — reads are lock-free (hot path), writes are rare
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ITaskHandler> _byTaskType
+        = new(StringComparer.Ordinal);
 
     public HandlerRegistry(IEnumerable<ITaskHandler> handlers)
     {
-        _byTaskType = new Dictionary<string, ITaskHandler>(StringComparer.Ordinal);
         foreach (var handler in handlers)
-        {
-            if (!_byTaskType.TryAdd(handler.TaskType, handler))
-            {
-                var existing = _byTaskType[handler.TaskType].GetType().FullName;
-                var duplicate = handler.GetType().FullName;
-                throw new InvalidOperationException(
-                    $"Duplicate ITaskHandler registration for TaskType '{handler.TaskType}': " +
-                    $"{existing} and {duplicate}. Each TaskType@version must have exactly one handler.");
-            }
-        }
+            TryRegister(handler, throwOnDuplicate: true);
     }
 
-    public IReadOnlyCollection<string> RegisteredTaskTypes => _byTaskType.Keys;
+    /// <summary>Register a handler at runtime. Returns false (and logs nothing) if already registered.</summary>
+    public bool TryRegister(ITaskHandler handler) => TryRegister(handler, throwOnDuplicate: false);
+
+    private bool TryRegister(ITaskHandler handler, bool throwOnDuplicate)
+    {
+        if (_byTaskType.TryAdd(handler.TaskType, handler)) return true;
+        if (!throwOnDuplicate) return false;
+        var existing = _byTaskType[handler.TaskType].GetType().FullName;
+        throw new InvalidOperationException(
+            $"Duplicate ITaskHandler for '{handler.TaskType}': {existing} vs {handler.GetType().FullName}");
+    }
+
+    public IReadOnlyCollection<string> RegisteredTaskTypes => _byTaskType.Keys.ToList();
 
     public bool TryGet(string taskType, out ITaskHandler handler)
         => _byTaskType.TryGetValue(taskType, out handler!);
