@@ -17,7 +17,7 @@ public class RegistrationService(
     AppDbConnection dbConnection,
     GrpcChannel grpcChannel,
     NodeTagState tagState,
-    IEnumerable<ITaskHandler> handlers)
+    HandlerRegistry registry)
 {
     private readonly string _apiKey = configuration["ApiKey"] ?? throw new InvalidOperationException("ApiKey is not configured");
     private readonly ILogger<RegistrationService> _logger = logger;
@@ -25,7 +25,7 @@ public class RegistrationService(
     private readonly AppDbConnection _dbConnection = dbConnection;
     private readonly GrpcChannel _grpcChannel = grpcChannel;
     private readonly NodeTagState _tagState = tagState;
-    private readonly IReadOnlyList<ITaskHandler> _handlers = handlers.ToList();
+    private readonly HandlerRegistry _registry = registry;
 
     // NodeId is resolved by NodeIdentityResolver in StartupService and
     // written into IConfiguration before any method here runs. Read it
@@ -87,7 +87,7 @@ public class RegistrationService(
             };
             foreach (var (k, v) in _tagState.Static)
                 request.StaticTags.Add(k, v);
-            foreach (var handler in _handlers)
+            foreach (var handler in _registry.All)
             {
                 var capability = new HandlerCapability
                 {

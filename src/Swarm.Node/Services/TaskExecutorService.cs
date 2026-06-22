@@ -28,6 +28,8 @@ public class TaskExecutorService : IAsyncDisposable
     private AsyncEventingBasicConsumer? _consumer;
     // P0-3a: tagged-queue subscriptions the Node currently holds, queueName → RabbitMQ consumer tag.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _taggedConsumers = new();
+    // Shared queues subscribed for hot-loaded handlers — managed separately so EnsureTaggedSubscriptionsAsync never cancels them.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _sharedConsumers = new();
     private readonly SemaphoreSlim _subscriptionGate = new(1, 1);
     // P5-1: atomic counter for the heartbeat metrics "in_flight_tasks" gauge.
     private volatile int _inFlightTasks;
@@ -113,6 +115,30 @@ public class TaskExecutorService : IAsyncDisposable
             await _channel.QueueDeclareAsync(queue: shared, durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
             await _channel.BasicConsumeAsync(queue: shared, autoAck: false, consumer: _consumer, cancellationToken: stoppingToken);
             _logger.LogInformation("Subscribed to shared queue '{Queue}'", shared);
+        }
+    }
+
+    /// <summary>
+    /// Subscribe to the shared task-type queue for a handler loaded at runtime.
+    /// No-op if the queue is already consumed (idempotent).
+    /// </summary>
+    public async Task EnsureSharedQueueAsync(string taskType, CancellationToken cancellationToken = default)
+    {
+        if (_channel is null || _consumer is null) return;
+
+        var queue = SharedQueueName(taskType);
+        await _subscriptionGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_sharedConsumers.ContainsKey(queue)) return;
+            await _channel.QueueDeclareAsync(queue: queue, durable: true, exclusive: false, autoDelete: false, cancellationToken: cancellationToken);
+            var tag = await _channel.BasicConsumeAsync(queue: queue, autoAck: false, consumer: _consumer, cancellationToken: cancellationToken);
+            _sharedConsumers[queue] = tag;
+            _logger.LogInformation("Subscribed to shared queue '{Queue}' (hot-loaded)", queue);
+        }
+        finally
+        {
+            _subscriptionGate.Release();
         }
     }
 

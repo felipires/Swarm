@@ -34,6 +34,8 @@ public sealed class HandlerRegistry
 
     public IReadOnlyCollection<string> RegisteredTaskTypes => _byTaskType.Keys.ToList();
 
+    public IEnumerable<ITaskHandler> All => _byTaskType.Values;
+
     public bool TryGet(string taskType, out ITaskHandler handler)
         => _byTaskType.TryGetValue(taskType, out handler!);
 }
